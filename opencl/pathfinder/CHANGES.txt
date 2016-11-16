@@ -1,0 +1,4 @@
+- Use compiled binary (d65b38a1378b3b7dbb75ce43d4fc587d1cc03b1e)
+- Explicitly set work group and local memory size (d65b38a1378b3b7dbb75ce43d4fc587d1cc03b1e)
+- Device selection (d65b38a1378b3b7dbb75ce43d4fc587d1cc03b1e)
+

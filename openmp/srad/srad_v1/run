@@ -1,0 +1,2 @@
+threads=$1
+./srad 100 0.5 4000 4000 $threads

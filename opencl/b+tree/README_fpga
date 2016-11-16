@@ -1,0 +1,22 @@
+# Problem size
+
+The problem size is defined by the input file specified by the -file command-line parameter.
+
+# Work-group configuration
+
+The number of threads in a work group with NDRange kernels is defined in problem_size.h. Macros DEFAULT_ORDER and DEFAULT_ORDER_2 define the sizes of the two kernels, kernel_gpu_opencl_v?.cl and kernel_gpu_opencl_2_v?.cl, respectively, where v? is a version number. They can be changed for example as follows:
+
+```
+make ALTERA=1 BOARD=AOC_BOARD_NAME KERNEL_DIM="-DRD_WG_SIZE_0_0=16 -DRD_WG_SIZE_1_0=16"
+```
+
+# How to Run the Benchmark
+
+The benchmark accepts two command-line parameters and a version specifier. The parameters serve as a problem input file and search command file, respectively. 
+```
+./b+tree.out file ../../data/b+tree/mil.txt command ../../data/b+tree/command.txt [v0|v1]
+```
+
+# Results
+
+Problem size (16, 16) failed to be compiled for Cyclone V with an error message of "Cannot fit kernel(s) on device". 

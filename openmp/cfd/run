@@ -1,0 +1,2 @@
+./euler3d_cpu ../../data/cfd/fvcorr.domn.097K 1000
+./pre_euler3d_cpu ../../data/cfd/fvcorr.domn.097K 1000
