@@ -1,0 +1,6 @@
+#!/bin/ksh -x
+numactl -N 0 -m 0 ./srad 100 0.5 2048 2048 8
+numactl -N 0 -m 0 ./srad 100 0.5 2048 2048 8
+numactl -N 0 -m 0 ./srad 100 0.5 2048 2048 8
+numactl -N 0 -m 0 ./srad 100 0.5 2048 2048 8
+numactl -N 0 -m 0 ./srad 100 0.5 2048 2048 8

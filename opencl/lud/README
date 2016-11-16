@@ -1,0 +1,18 @@
+The dimension of input matrix should be a multiple of block size. 
+
+*****Adjustable work group size*****
+The kernel has square shape 
+RD_WG_SIZE_0 or RD_WG_SIZE_0_0 describe one dimension 
+The actual dimension = RD_WG_SIZE_0 * RD_WG_SIZE_0
+
+For GPU and CPU:
+make KERNEL_DIM="-DRD_WG_SIZE_0=16"
+
+For Altera FPGA:
+make ALTERA=1 BLOCK_SIZE=64 BOARD=de5net_a7            (Host and device)
+make ALTERA=1 BLOCK_SIZE=64 BOARD=de5net_a7 HOSTONLY=1 (Host only)
+
+Clean:
+make clean
+
+Power measurement is available for Bittware A10PL4 board (BOARD=a10pl4_gx115es3)

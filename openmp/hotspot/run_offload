@@ -1,0 +1,1 @@
+./hotspot_offload 1024 1024 10000 16 ../../data/hotspot/temp_1024 ../../data/hotspot/power_1024 output.out

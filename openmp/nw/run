@@ -1,0 +1,2 @@
+threads=$1
+./needle 16384 10 $threads
