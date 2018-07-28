@@ -20,6 +20,7 @@
 #include <stdio.h>					// (in path known to compiler)			needed by printf
 #include <stdlib.h>					// (in path known to compiler)			needed by malloc
 #include <stdbool.h>				// (in path known to compiler)			needed by true/false
+ #include <string.h>				// (in path known to compiler)			needed by strcmp
 
 //======================================================================================================================================================150
 //	UTILITIES
@@ -250,7 +251,11 @@ main(	int argc,
 	//====================================================================================================100
 
 	// random generator seed set to random value - time in this case
+#ifdef OUTPUT
+	srand(10);
+#else
 	srand(time(NULL));
+#endif
 
 	// input (distances)
 	rv_cpu = (FOUR_VECTOR*)malloc(dim_cpu.space_mem);

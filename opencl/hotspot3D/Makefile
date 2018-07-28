@@ -1,17 +1,33 @@
-ifndef CC
-	CC = gcc
+include ../../common/make.config
+
+NAME = hotspot3D
+ifeq ($(OS),Windows_NT)
+	EXE = $(NAME).exe
+else
+	EXE = $(NAME)
+endif
+SRC = 3D.c CL_helper.c
+
+VERSIONS = 0 1 3
+KERNEL_NAMES = $(foreach var,$(VERSIONS),$(NAME)_kernel_v$(var))
+KERNEL_ALTERA_NAMES = $(addsuffix .aocx, $(KERNEL_NAMES))
+
+ifdef ALTERA
+	ifdef HOST_ONLY
+		AOT_PROGRAMS = 
+	else
+		AOT_PROGRAMS = $(KERNEL_ALTERA_NAMES)
+	endif
+else
+	AOT_PROGRAMS =
 endif
 
-OUTPUT = *.out
-CCFLAGS=-O3 -lm 
+OUTPUT = *.txt
 
-LIBS = -lOpenCL 
-OPENCL_DIR = /if10/kw5na/Packages/AMD-APP-SDK-v2.8-RC-lnx64
-OPENCL_INC = $(OPENCL_DIR)/include/ 
-OPENCL_LIB = $(OPENCL_DIR)/lib/x86_64/ -lOpenCL
+EXTRA_FLAGS += -lm
 
-3D: 3D.c CL_helper.c
-	$(CC) $^ $(CCFLAGS) $(LIBS) -I$(OPENCL_INC) -L$(OPENCL_LIB) -o $@
+all: $(SRC) $(AOT_PROGRAMS)
+	$(CC) $(CFLAGS) $(SRC) -o $(EXE) $(OPENCL_INC) $(OPENCL_LIB) $(EXTRA_FLAGS)
 
 clean:
-	rm -f 3D $(OUTPUT) 
+	$(RM) $(EXE) *.aoco *.aocx $(KERNEL_NAMES) $(OUTPUT)

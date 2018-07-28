@@ -1,4 +1,5 @@
 #include "CL_helper.h"
+#include <sys/time.h>
 
 #define STR_SIZE 256
 
@@ -110,8 +111,6 @@ char *err_code (cl_int err_in)
             return (char*)" CL_INVALID_MIP_LEVEL ";
         case CL_INVALID_GLOBAL_WORK_SIZE :
             return (char*)" CL_INVALID_GLOBAL_WORK_SIZE ";
-        case CL_INVALID_PROPERTY :
-            return (char*)" CL_INVALID_PROPERTY ";
         default:
             return (char*)"UNKNOWN ERROR";
 

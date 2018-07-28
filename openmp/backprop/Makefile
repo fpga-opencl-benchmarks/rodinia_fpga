@@ -1,6 +1,10 @@
 # C compiler
 CC = gcc
-CC_FLAGS = -g -fopenmp  -O2
+CC_FLAGS = -g -fopenmp  -O3
+
+ifdef OUTPUT
+	CC_FLAGS += -DOUTPUT
+endif
 
 
 backprop: backprop.o facetrain.o imagenet.o backprop_kernel.o 

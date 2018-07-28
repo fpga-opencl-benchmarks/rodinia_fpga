@@ -47,7 +47,7 @@ void bpnn_train(BPNN *net, float *eo, float *eh);
 //void bpnn_train();
 //void bpnn_feedforward();
 void bpnn_feedforward(BPNN *net);
-void bpnn_save(BPNN *net, char *filename);
+void bpnn_save(BPNN *net, const char *filename);
 //void bpnn_save();
 //BPNN *bpnn_read();
 BPNN *bpnn_read(char *filename);
@@ -60,5 +60,6 @@ void bpnn_adjust_weights(float *delta, int ndelta, float *ly, int nly, float **w
 int setup(int argc, char** argv);
 float **alloc_2d_dbl(int m, int n);
 float squash(float x);
+void backprop_face();
 
 #endif

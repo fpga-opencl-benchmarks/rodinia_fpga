@@ -134,55 +134,36 @@ int main(int argc, char** argv)
 	cl_mem d_gpuResult[2];
 	if (is_ndrange_kernel(version))
 	{
-		d_gpuWall = clCreateBuffer(cl.ctxt(),
-						CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR,
-						sizeof(cl_int)*(size-cols),
-						(data + cols),
-						NULL);
+		d_gpuWall      = clCreateBuffer(cl.ctxt(), CL_MEM_READ_ONLY , sizeof(cl_int)*(size-cols), NULL, NULL);
+		d_gpuResult[0] = clCreateBuffer(cl.ctxt(), CL_MEM_READ_WRITE, sizeof(cl_int)*cols       , NULL, NULL);
 
-		d_gpuResult[0] = clCreateBuffer(cl.ctxt(),
-						CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR,
-						sizeof(cl_int)*cols,
-						data,
-						NULL);
+		CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuWall     , CL_TRUE, 0, sizeof(cl_int)*(size-cols), data + cols, 0, NULL, NULL));
+		CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuResult[0], CL_TRUE, 0, sizeof(cl_int)*cols       , data       , 0, NULL, NULL));
 	}
-	else if (version != 5 && version != 7 && version != 9) 
+	else if (version <= 3)
 	{
-		d_gpuWall = clCreateBuffer(cl.ctxt(),
-						CL_MEM_READ_ONLY,
-						sizeof(cl_int)*(size-cols),
-						NULL,
-						NULL);
+		d_gpuWall      = clCreateBuffer(cl.ctxt(), CL_MEM_READ_ONLY , sizeof(cl_int)*size, NULL, NULL);
+		d_gpuResult[0] = clCreateBuffer(cl.ctxt(), CL_MEM_READ_WRITE, sizeof(cl_int)*cols, NULL, NULL);
 
-		d_gpuResult[0] = clCreateBuffer(cl.ctxt(),
-						CL_MEM_READ_WRITE,
-						sizeof(cl_int)*cols,
-						NULL,
-						NULL);
-        }
-        else
-        {
-		d_gpuWall = clCreateBuffer(cl.ctxt(),
-						CL_MEM_READ_ONLY,
-						sizeof(cl_int)*(size),
-						NULL,
-						NULL);
+		CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuWall     , CL_TRUE, 0, sizeof(cl_int)*(size), data, 0, NULL, NULL));
+		CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuResult[0], CL_TRUE, 0, sizeof(cl_int)*cols  , data, 0, NULL, NULL));
+	}
+	else
+	{
+		d_gpuWall = clCreateBuffer(cl.ctxt(), CL_MEM_READ_ONLY, sizeof(cl_int)*size, NULL, NULL);
+
+		CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuWall, CL_TRUE, 0, sizeof(cl_int)*(size), data, 0, NULL, NULL));
 	}
 
-
-	d_gpuResult[1] = clCreateBuffer(cl.ctxt(),
-					CL_MEM_READ_WRITE,
-					sizeof(cl_int)*cols,
-					NULL,
-					NULL);
+	d_gpuResult[1] = clCreateBuffer(cl.ctxt(), CL_MEM_READ_WRITE, sizeof(cl_int)*cols, NULL, NULL);
 
 	int src, dst;
 	if (is_ndrange_kernel(version))
 	{
 		src = 1;
 		dst = 0;
-		
-		// Set fixed kernel arguments.
+
+		// Set fixed kernel arguments
 		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 0, sizeof(cl_int), (void*) &pyramid_height));
 		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 1, sizeof(cl_mem), (void*) &d_gpuWall));
 		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 4, sizeof(cl_int), (void*) &cols));
@@ -190,7 +171,7 @@ int main(int argc, char** argv)
 		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 7, sizeof(cl_int), (void*) &borderCols));
 		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 8, sizeof(cl_int) * BLOCK_SIZE, 0));
 		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 9, sizeof(cl_int) * BLOCK_SIZE, 0));
-		
+
 		GetTime(kernelStart);
 		for (int startStep = 0; startStep < rows - 1; startStep += pyramid_height)
 		{
@@ -207,38 +188,47 @@ int main(int argc, char** argv)
 			cl.launch(kn, version);
 		}
 	}
-	else if (version != 5 && version != 7 && version != 9) 
+	else if (version <= 3)
 	{
-		src = 0;
+		src = 1;
+		dst = 0;
+
+		// Set fixed kernel arguments
+		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 0, sizeof(cl_mem), (void*) &d_gpuWall));
+		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 3, sizeof(cl_int), (void*) &cols));
+
+		GetTime(kernelStart);
+		for (int t = 0; t < rows - 1; t++)
+		{
+			int temp = src;
+			src = dst;
+			dst = temp;
+
+			// Calculate changed kernel arguments...
+			CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 1, sizeof(cl_mem), (void*) &d_gpuResult[src]));
+			CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 2, sizeof(cl_mem), (void*) &d_gpuResult[dst]));
+			CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 4, sizeof(cl_int), (void*) &t));
+			
+			// Launch kernel
+			cl.launch(kn, version);
+		}
+	}
+	else
+	{
 		dst = 1;
-		
+
 		// Set kernel arguments.
 		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 0, sizeof(cl_mem), (void*) &d_gpuWall));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 1, sizeof(cl_mem), (void*) &d_gpuResult[src]));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 2, sizeof(cl_mem), (void*) &d_gpuResult[dst]));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 3, sizeof(cl_int), (void*) &cols));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 4, sizeof(cl_int), (void*) &rows));
-		
-		CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuWall, CL_TRUE, 0, sizeof(cl_int)*(size-cols), (data + cols), 0, NULL, NULL));
-		CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuResult[0], CL_TRUE, 0, sizeof(cl_int)*cols, (data), 0, NULL, NULL));
-		
-		GetTime(kernelStart);
-		// Launch kernel
-		cl.launch(kn, version);
-	}
-        else
-        {
-                dst = 1;
-                CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 0, sizeof(cl_mem), (void*) &d_gpuWall));
 		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 1, sizeof(cl_mem), (void*) &d_gpuResult[dst]));
 		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 2, sizeof(cl_int), (void*) &cols));
 		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 3, sizeof(cl_int), (void*) &rows));
-          
-          	CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuWall, CL_TRUE, 0, sizeof(cl_int)*(size), data, 0, NULL, NULL));
 
-                GetTime(kernelStart);
-                cl.launch(kn, version);
-        }
+		GetTime(kernelStart);
+
+		// Launch kernel
+		cl.launch(kn, version);
+	}
+
 	clFinish(cl.command_queue);
 	GetTime(kernelEnd);
 
@@ -268,14 +258,14 @@ int main(int argc, char** argv)
 		fprintf(resultFile, "%d ",result[i]) ;
 	}
 	fprintf(resultFile, "\n") ;
-	
-	printf("Kernel execution time is: %0.6lf ms\n", TimeDiff(kernelStart, kernelEnd));
+
+	printf("\nComputation done in %0.3lf ms.\n", TimeDiff(kernelStart, kernelEnd));
 
 	// Memory cleanup here.
 	free(data);
 	free(wall);
 	free(result);
 	fclose(resultFile);
-	
+
 	return EXIT_SUCCESS;
 }

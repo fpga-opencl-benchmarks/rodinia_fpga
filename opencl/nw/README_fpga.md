@@ -43,13 +43,21 @@ See the github Wiki page for more general information.
 
 ## v1
 
-A straightforward single work-item kernel. Iterates through the
-2-dimensional space from top left to bottom right.
+A straightforward single work-item kernel plus restrict keyword.
+Iterates through the 2-dimensional space from top left to bottom right.
+Due to load/store dependency on the input_itemsets variable, the outer
+loop is run sequentially and the inner loop is run with an II of 328
+(latency of two memory accesses).
 
 ## v3
 
-Add restrict to input arrays. The compiler does not pipeline the loop
-yet due to the load and store accesses to array input_itemsets.
+This version saves the output of each iteration in a backup buffer
+to be used for left dependency in the next iteration. This, coupled
+with #pragma ivdep on the input_itemsets variable allows full pipelining
+on the inner loop. The outer loop is still run sequentially due to
+dependency on the same variable which is unavoidable in this implementation.
+Unrolling the inner loop results in new load/store dependencies and hence,
+was avoided.
 
 ## nw_kernel_single_work_item_volatile.cl (formerly v5)
 

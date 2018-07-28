@@ -12,8 +12,7 @@ extern "C" {
 //	KERNEL_GPU_CUDA_WRAPPER HEADER
 //========================================================================================================================================================================================================200
 
-void 
-kernel_gpu_opencl_wrapper(	fp* image,					// input image
+void kernel_gpu_opencl_wrapper(	fp* image,					// input image
                                 cl_int Nr,					// IMAGE nbr of rows
                                 cl_int Nc,					// IMAGE nbr of cols
                                 cl_long Ne,					// IMAGE nbr of elem
@@ -27,10 +26,14 @@ kernel_gpu_opencl_wrapper(	fp* image,					// input image
                                 int mem_size_i,
                                 int mem_size_j,
                                 int version,
-//                                double* kernelRunTime,				// For calculating kernel execution time
+//                                double* kernelRunTime,			// For calculating kernel execution time
                                 double* extractTime,				// For image compression kernel (before compute loop)
                                 double* computeTime,				// For the compute loop, similar to the CUDA version of the benchmark
-                                double* compressTime);				// For image compression kernel (after compute loop)
+                                double* compressTime				// For image compression kernel (after compute loop)
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+                             ,  double* power					// Power usage for supported boards
+#endif
+                             );
 
 //========================================================================================================================================================================================================200
 //	END

@@ -20,7 +20,7 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <assert.h>
-#ifdef AOCL_BOARD_a10pl4_gx115es3
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
 	#include "../../../common/power_fpga.h"
 #endif
 
@@ -37,9 +37,6 @@ using std::string;
 
 #include "../../common/opencl_util.h"
 #include "../../../common/timer.h"
-#ifndef BLOCK_SIZE
-	#include "problem_size.h"
-#endif
 
 static cl_context       context;
 static cl_command_queue cmd_queue;
@@ -51,7 +48,7 @@ static cl_int           num_devices;
 static int initialize()
 {
 	size_t size;
-        cl_int err;
+	cl_int err;
 	// create OpenCL context
 #if 0
 	cl_platform_id platform_id;
@@ -59,19 +56,19 @@ static int initialize()
 	cl_context_properties ctxprop[] = { CL_CONTEXT_PLATFORM, (cl_context_properties)platform_id, 0};
 	device_type = use_gpu ? CL_DEVICE_TYPE_GPU : CL_DEVICE_TYPE_CPU;
 #else
-        cl_platform_id *platforms = NULL;
-        cl_uint num_platforms = 0;
-        cl_context_properties ctxprop[3];
-        display_device_info(&platforms, &num_platforms);
-        select_device_type(platforms, &num_platforms, &device_type);
-        validate_selection(platforms, &num_platforms, ctxprop, &device_type);
+	cl_platform_id *platforms = NULL;
+	cl_uint num_platforms = 0;
+	cl_context_properties ctxprop[3];
+	display_device_info(&platforms, &num_platforms);
+	select_device_type(platforms, &num_platforms, &device_type);
+	validate_selection(platforms, &num_platforms, ctxprop, &device_type);
 #endif
 
 	context = clCreateContextFromType( ctxprop, device_type, NULL, NULL, &err );
 	if ( err != CL_SUCCESS ) {
-          display_error_message(err, stderr);
-          return -1;
-        }
+		display_error_message(err, stderr);
+		return -1;
+	}
 
 	// get the list of GPUs
 	CL_SAFE_CALL(clGetContextInfo( context, CL_CONTEXT_DEVICES, 0, NULL, &size ));
@@ -121,11 +118,10 @@ static struct option long_options[] = {
       {0,0,0,0}
 };
 
-int
-main ( int argc, char *argv[] )
+int main ( int argc, char *argv[] )
 {
-	printf("WG size of kernel = %d X %d\n", BLOCK_SIZE, BLOCK_SIZE);
-	int matrix_dim = 32; /* default matrix_dim */
+	int block_size = 16; // default block size
+	int matrix_dim = 32; // default matrix dimension
 	int opt, option_index=0;
 	func_ret_t ret;
 	const char *input_file = NULL;
@@ -139,8 +135,8 @@ main ( int argc, char *argv[] )
 #endif
 	size_t globalwork2, globalwork3;
 
-#ifdef AOCL_BOARD_a10pl4_gx115es3
-	// power measurement flags, only for Arria 10
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+	// power measurement parameters, only for Bittware's A10PL4 board
 	int flag = 0;
 	double power = 0;
 	double energy = 0;
@@ -155,36 +151,34 @@ main ( int argc, char *argv[] )
 	// get kernel version from commandline
 	init_fpga(&argc, &argv, &version);
 
-        // Does Windows have getopt_long? This is just simple argument
-        // handling, so if it's not available on Windows, just not use
-        // the function.
-	while ((opt = getopt_long(argc, argv, "::vs:i:", 
-                                  long_options, &option_index)) != -1 ) {
-          switch(opt){
-            case 'i':
-              input_file = optarg;
-              break;
-            case 'v':
-              do_verify = 1;
-              break;
-            case 's':
-              matrix_dim = atoi(optarg);
-              printf("Generate input matrix internally, size =%d\n", matrix_dim);
-              // fprintf(stderr, "Currently not supported, use -i instead\n");
-              // fprintf(stderr, "Usage: %s [-v] [-s matrix_size|-i input_file]\n", argv[0]);
-              // exit(EXIT_FAILURE);
-              break;
-            case '?':
-              fprintf(stderr, "invalid option\n");
-              break;
-            case ':':
-              fprintf(stderr, "missing argument\n");
-              break;
-            default:
-              fprintf(stderr, "Usage: %s [-v] [-s matrix_size|-i input_file]\n",
-                      argv[0]);
-              exit(EXIT_FAILURE);
-          }
+	// Does Windows have getopt_long? This is just simple argument
+	// handling, so if it's not available on Windows, just not use
+	// the function.
+	while ((opt = getopt_long(argc, argv, "::vs:i:b:", long_options, &option_index)) != -1 ) {
+		switch(opt){
+			case 'i':
+				input_file = optarg;
+				break;
+			case 'v':
+				do_verify = 1;
+				break;
+			case 's':
+				matrix_dim = atoi(optarg);
+				printf("Generate input matrix internally, size =%d\n", matrix_dim);
+				break;
+			case 'b':
+				block_size = atoi(optarg);
+				break;
+			case '?':
+				fprintf(stderr, "invalid option\n");
+				break;
+			case ':':
+				fprintf(stderr, "missing argument\n");
+				break;
+			default:
+				fprintf(stderr, "Usage: %s [-v] [-s matrix_size|-i input_file] [-b block_size]\n", argv[0]);
+				exit(EXIT_FAILURE);
+		}
 	}
 
 	if ( (optind < argc) || (optind == 1)) {
@@ -203,19 +197,21 @@ main ( int argc, char *argv[] )
 	}
 
 	else if (matrix_dim) {
-	  printf("Creating matrix internally size=%d\n", matrix_dim);
-	  ret = create_matrix(&m, matrix_dim);
-	  if (ret != RET_SUCCESS) {
-	    m = NULL;
-	    fprintf(stderr, "error create matrix internally size=%d\n", matrix_dim);
-	    exit(EXIT_FAILURE);
-	  }
+		printf("Creating matrix internally size=%d\n", matrix_dim);
+		ret = create_matrix(&m, matrix_dim);
+		if (ret != RET_SUCCESS) {
+			m = NULL;
+			fprintf(stderr, "error create matrix internally size=%d\n", matrix_dim);
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	else {
-	  printf("No input file specified!\n");
-	  exit(EXIT_FAILURE);
+		printf("No input file specified!\n");
+		exit(EXIT_FAILURE);
 	}
+
+	printf("WG size of kernel = %d X %d\n", block_size, block_size);
 
 	if (do_verify){
 		//printf("Before LUD\n");
@@ -242,25 +238,16 @@ main ( int argc, char *argv[] )
 	const char * slist[2] = { source, 0 };
 	cl_program prog = clCreateProgramWithSource(context, 1, slist, NULL, &err);
 #else
-	cl_program prog = clCreateProgramWithBinary(context,
-                                                    1,
-                                                    device_list,
-                                                    &sourcesize,
-                                                    (const unsigned char**)&source,
-                                                    NULL,
-                                                    &err);
+	cl_program prog = clCreateProgramWithBinary(context, 1, device_list, &sourcesize, (const unsigned char**)&source, NULL, &err);
 #endif
 
 	if(err != CL_SUCCESS) {
-          display_error_message(err, stderr);
-          return -1;
-        }
+		display_error_message(err, stderr);
+		return -1;
+	}
 #if defined(USE_JIT)
 	char clOptions[110];
-	sprintf(clOptions, "-I.");
-#ifdef BLOCK_SIZE
-	sprintf(clOptions + strlen(clOptions), " -DBLOCK_SIZE=%d", BLOCK_SIZE);
-#endif
+	sprintf(clOptions, "-I. -DBSIZE=%d", block_size);
 	clBuildProgram_SAFE(prog, num_devices, device_list, clOptions, NULL, NULL);
 #endif // USE_JIT        
 
@@ -279,7 +266,7 @@ main ( int argc, char *argv[] )
 		CL_SAFE_CALL( clSetKernelArg(lud, 0, sizeof(void *), (void*) &d_m       ) );
 		CL_SAFE_CALL( clSetKernelArg(lud, 1, sizeof(cl_int), (void*) &matrix_dim) );
 
-#ifdef AOCL_BOARD_a10pl4_gx115es3
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
 		#pragma omp parallel num_threads(2) shared(flag)
 		{
 			if (omp_get_thread_num() == 0)
@@ -298,7 +285,7 @@ main ( int argc, char *argv[] )
 
 				// end of timing point
 				GetTime(end);
-#ifdef AOCL_BOARD_a10pl4_gx115es3
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
 				flag = 1;
 			}
 		}
@@ -320,7 +307,7 @@ main ( int argc, char *argv[] )
 		if(err != CL_SUCCESS) { printf("ERROR: clCreateKernel() 0 => %d\n", err); return -1; }
 		clReleaseProgram(prog); 
 
-		if (version >= 4)
+		if (!is_ndrange_kernel(version) || version >= 4)
 		{
 			// fixed kernel arguments
 			CL_SAFE_CALL( clSetKernelArg(diagonal,  0, sizeof(void *),                      (void*) &d_m       ) );
@@ -347,31 +334,31 @@ main ( int argc, char *argv[] )
 		{
 			// fixed kernel arguments
 			CL_SAFE_CALL( clSetKernelArg(diagonal,  0, sizeof(void *),                      (void*) &d_m       ) );
-			CL_SAFE_CALL( clSetKernelArg(diagonal,  1, sizeof(float)*BLOCK_SIZE*BLOCK_SIZE, (void*) NULL       ) );
+			CL_SAFE_CALL( clSetKernelArg(diagonal,  1, sizeof(float)*block_size*block_size, (void*) NULL       ) );
 			CL_SAFE_CALL( clSetKernelArg(diagonal,  2, sizeof(cl_int),                      (void*) &matrix_dim) );
 			
 			CL_SAFE_CALL( clSetKernelArg(perimeter, 0, sizeof(void *),                      (void*) &d_m       ) );
-			CL_SAFE_CALL( clSetKernelArg(perimeter, 1, sizeof(float)*BLOCK_SIZE*BLOCK_SIZE, (void*) NULL       ) );
-			CL_SAFE_CALL( clSetKernelArg(perimeter, 2, sizeof(float)*BLOCK_SIZE*BLOCK_SIZE, (void*) NULL       ) );
-			CL_SAFE_CALL( clSetKernelArg(perimeter, 3, sizeof(float)*BLOCK_SIZE*BLOCK_SIZE, (void*) NULL       ) );
+			CL_SAFE_CALL( clSetKernelArg(perimeter, 1, sizeof(float)*block_size*block_size, (void*) NULL       ) );
+			CL_SAFE_CALL( clSetKernelArg(perimeter, 2, sizeof(float)*block_size*block_size, (void*) NULL       ) );
+			CL_SAFE_CALL( clSetKernelArg(perimeter, 3, sizeof(float)*block_size*block_size, (void*) NULL       ) );
 			CL_SAFE_CALL( clSetKernelArg(perimeter, 4, sizeof(cl_int),                      (void*) &matrix_dim) );
 			
 			CL_SAFE_CALL( clSetKernelArg(internal,  0, sizeof(void *),                      (void*) &d_m       ) );
-			CL_SAFE_CALL( clSetKernelArg(internal,  1, sizeof(float)*BLOCK_SIZE*BLOCK_SIZE, (void*) NULL       ) );
-			CL_SAFE_CALL( clSetKernelArg(internal,  2, sizeof(float)*BLOCK_SIZE*BLOCK_SIZE, (void*) NULL       ) );
+			CL_SAFE_CALL( clSetKernelArg(internal,  1, sizeof(float)*block_size*block_size, (void*) NULL       ) );
+			CL_SAFE_CALL( clSetKernelArg(internal,  2, sizeof(float)*block_size*block_size, (void*) NULL       ) );
 			CL_SAFE_CALL( clSetKernelArg(internal,  3, sizeof(cl_int),                      (void*) &matrix_dim) );
 		}
 		
 		// fixed work sizes
-		size_t global_work1[3] = {BLOCK_SIZE, 1, 1};
-		size_t local_work1[3]  = {BLOCK_SIZE, 1, 1};
+		size_t global_work1[3] = {(size_t)block_size, 1, 1};
+		size_t local_work1[3]  = {(size_t)block_size, 1, 1};
 
-		size_t peri_work_size  = (version == 8) ? BLOCK_SIZE : BLOCK_SIZE * 2;
+		size_t peri_work_size  = (version == 8) ? (size_t)block_size : (size_t)block_size * 2;
 		size_t local_work2[3]  = {peri_work_size, 1, 1};
 
-		size_t local_work3[3]  = {BLOCK_SIZE, BLOCK_SIZE, 1};
+		size_t local_work3[3]  = {(size_t)block_size, (size_t)block_size, 1};
 
-#ifdef AOCL_BOARD_a10pl4_gx115es3
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
 		#pragma omp parallel num_threads(2) shared(flag)
 		{
 			if (omp_get_thread_num() == 0)
@@ -384,9 +371,9 @@ main ( int argc, char *argv[] )
 #endif
 				// beginning of timing point
 				GetTime(start);
-				for (i = 0; i < matrix_dim - BLOCK_SIZE; i += BLOCK_SIZE)
+				for (i = 0; i < matrix_dim - block_size; i += block_size)
 				{
-					if (version >= 4)
+					if (!is_ndrange_kernel(version) || version >= 4)
 					{
 						CL_SAFE_CALL( clSetKernelArg(diagonal , 2, sizeof(cl_int), (void*) &i) );
 						if (version == 8)
@@ -407,8 +394,8 @@ main ( int argc, char *argv[] )
 						CL_SAFE_CALL( clSetKernelArg(internal , 4, sizeof(cl_int), (void*) &i) );
 					}
 					
-					globalwork2 = peri_work_size * (((matrix_dim-i)/BLOCK_SIZE) - 1);
-					globalwork3 = BLOCK_SIZE * (((matrix_dim-i)/BLOCK_SIZE) - 1);
+					globalwork2 = peri_work_size * (((matrix_dim-i)/block_size) - 1);
+					globalwork3 = block_size * (((matrix_dim-i)/block_size) - 1);
 					
 					size_t global_work2[3] = {globalwork2, 1, 1};
 					size_t global_work3[3] = {globalwork3, globalwork3, 1};
@@ -511,7 +498,7 @@ main ( int argc, char *argv[] )
 					}
 				}
 
-				if (version >= 4)
+				if (!is_ndrange_kernel(version) || version >= 4)
 				{
 					CL_SAFE_CALL( clSetKernelArg(diagonal, 2, sizeof(cl_int), (void*) &i) );
 				}
@@ -532,7 +519,7 @@ main ( int argc, char *argv[] )
 				clFinish(cmd_queue);
 				// end of timing point
 				GetTime(end);
-#ifdef AOCL_BOARD_a10pl4_gx115es3
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
 				flag = 1;
 			}
 		}
@@ -546,7 +533,7 @@ main ( int argc, char *argv[] )
 	totalTime = TimeDiff(start, end);
 	printf("Computation done in %0.3lf ms.\n", totalTime);
 
-#ifdef AOCL_BOARD_a10pl4_gx115es3
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
 	energy = GetEnergyFPGA(power, totalTime);
 	if (power != -1) // -1 --> failed to read energy values
 	{

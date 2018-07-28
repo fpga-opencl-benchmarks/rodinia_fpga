@@ -7,10 +7,6 @@ CXXLAGS += $(INC)
 CSOURCES=common/common.c
 CPPSOURCES=ocl/lud.cpp
 
-ifdef BLOCK_SIZE
-	CFLAGS += -DBLOCK_SIZE=$(BLOCK_SIZE)
-endif
-
 ifeq ($(OS),Windows_NT)
 	EXE=lud.exe
 	LDFLAGS+=/out:$@
@@ -31,17 +27,13 @@ else
 endif
 
 ifdef ALTERA
-	ifdef HOSTONLY
+	ifdef HOST_ONLY
 		AOT_PROGRAMS =
 	else
 		AOT_PROGRAMS = AOCX
 	endif
 else
 	AOT_PROGRAMS = 
-endif
-
-ifeq ($(BOARD),a10pl4_gx115es3)
-	CFLAGS += $(BITTWARE_INC) $(BITTWARE_LIB) $(BITTWARE_FLAGS)
 endif
 
 all: $(EXE) $(AOT_PROGRAMS)

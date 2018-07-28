@@ -1,1 +1,2 @@
-./backprop 65536
+version=$1
+./backprop 12800000 $version

@@ -1,12 +1,15 @@
 #!/bin/bash
 
-benchmarks=(nw hotspot pathfinder srad lud cfd_eu cfd_pre_eu)
+benchmarks=(nw hotspot hotspot3D pathfinder srad lavaMD lud backprop cfd_eu cfd_pre_eu)
 
 nw_version=(0 1 2 3 4 7 9 11 13 15)
 hotspot_version=(0 1 2 3 5 7 9 11)
+hotspot3D_version=(0 1 3)
 pathfinder_version=(0 1 2 3 4 11 13 15)
 srad_version=(0 1 2 3 5)
+lavaMD_version=(0 1 3)
 lud_version=(0 1 2 3 4 5)
+backprop_version=(0 1 3)
 cfd_eu_version=(0 1 2 3 4 5 7)
 cfd_pre_eu_version=(0 1 2 3)
 

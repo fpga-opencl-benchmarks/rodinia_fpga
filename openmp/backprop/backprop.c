@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include "backprop.h"
 #include <math.h>
+#include <fcntl.h>
+#include <unistd.h>
 #define OPEN
 
 #define ABS(x)          (((x) > 0.0) ? (x) : (-(x)))
@@ -89,7 +91,7 @@ int m, n;
 }
 
 
-bpnn_randomize_weights(w, m, n)
+void bpnn_randomize_weights(w, m, n)
 float **w;
 int m, n;
 {
@@ -103,7 +105,7 @@ int m, n;
   }
 }
 
-bpnn_randomize_row(w, m)
+void bpnn_randomize_row(w, m)
 float *w;
 int m;
 {
@@ -115,7 +117,7 @@ int m;
 }
 
 
-bpnn_zero_weights(w, m, n)
+void bpnn_zero_weights(w, m, n)
 float **w;
 int m, n;
 {
@@ -129,7 +131,7 @@ int m, n;
 }
 
 
-void bpnn_initialize(seed)
+void bpnn_initialize(int seed)
 {
   printf("Random number generator seed: %d\n", seed);
   srand(seed);
@@ -304,6 +306,7 @@ int nh, no;
 
 void bpnn_adjust_weights(delta, ndelta, ly, nly, w, oldw)
 float *delta, *ly, **w, **oldw;
+int ndelta, nly;
 {
   float new_dw;
   int k, j;
@@ -382,65 +385,34 @@ float *eo, *eh;
 
 
 
-void bpnn_save(net, filename)
-BPNN *net;
-char *filename;
+void bpnn_save(BPNN *net, const char *filename)
 {
-  int n1, n2, n3, i, j, memcnt;
-  float dvalue, **w;
-  char *mem;
-  ///add//
+  int n1, n2, n3, i, j;
+  float **w;
   FILE *pFile;
   pFile = fopen( filename, "w+" );
-  ///////
-  /*
-  if ((fd = creat(filename, 0644)) == -1) {
-    printf("BPNN_SAVE: Cannot create '%s'\n", filename);
-    return;
-  }
-  */
 
   n1 = net->input_n;  n2 = net->hidden_n;  n3 = net->output_n;
   printf("Saving %dx%dx%d network to '%s'\n", n1, n2, n3, filename);
-  //fflush(stdout);
 
-  //write(fd, (char *) &n1, sizeof(int));
-  //write(fd, (char *) &n2, sizeof(int));
-  //write(fd, (char *) &n3, sizeof(int));
+  fprintf(pFile, "%dx%dx%d\n", n1, n2, n3);
 
-  fwrite( (char *) &n1 , sizeof(char), sizeof(char), pFile);
-  fwrite( (char *) &n2 , sizeof(char), sizeof(char), pFile);
-  fwrite( (char *) &n3 , sizeof(char), sizeof(char), pFile);
-
-  
-
-  memcnt = 0;
   w = net->input_weights;
-  mem = (char *) malloc ((unsigned) ((n1+1) * (n2+1) * sizeof(float)));
   for (i = 0; i <= n1; i++) {
     for (j = 0; j <= n2; j++) {
-      dvalue = w[i][j];
-      fastcopy(&mem[memcnt], &dvalue, sizeof(float));
-      memcnt += sizeof(float);
+      fprintf(pFile, "%.8f ", w[i][j]);
     }
+    fprintf(pFile, "\n");
   }
-  //write(fd, mem, (n1+1) * (n2+1) * sizeof(float));
-  fwrite( mem , (unsigned)(sizeof(float)), (unsigned) ((n1+1) * (n2+1) * sizeof(float)) , pFile);
-  free(mem);
+  fprintf(pFile, "\n");
 
-  memcnt = 0;
   w = net->hidden_weights;
-  mem = (char *) malloc ((unsigned) ((n2+1) * (n3+1) * sizeof(float)));
   for (i = 0; i <= n2; i++) {
     for (j = 0; j <= n3; j++) {
-      dvalue = w[i][j];
-      fastcopy(&mem[memcnt], &dvalue, sizeof(float));
-      memcnt += sizeof(float);
+      fprintf(pFile, "%.8f ", w[i][j]);
     }
+    fprintf(pFile, "\n");
   }
-  //write(fd, mem, (n2+1) * (n3+1) * sizeof(float));
-  fwrite( mem , sizeof(float), (unsigned) ((n2+1) * (n3+1) * sizeof(float)) , pFile);
-  free(mem);
 
   fclose(pFile);
   return;

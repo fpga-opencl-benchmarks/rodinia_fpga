@@ -1,1 +1,3 @@
-./nw 16384 10 block-size version
+version=$1
+block_size=$2
+./nw 16384 10 $block_size $version

@@ -1,303 +1,258 @@
-#ifdef USE_AOT
-	#include "problem_size.h"
+#ifndef BSIZE
+	#define BSIZE 32
 #endif
 
 #define FADD_LATENCY 8
 
-#define LMEM_SIZE __attribute__((local_mem_size(BLOCK_SIZE*BLOCK_SIZE*4))) 
+#ifndef DIA_UNROLL
+	#define DIA_UNROLL 1
+#endif
+#define DIA_REDUCTION_LATENCY ((DIA_UNROLL + (DIA_UNROLL % 2)) / 2) * FADD_LATENCY
+
+#ifndef PER_UNROLL
+	#define PER_UNROLL 1
+#endif
+#define PER_REDUCTION_LATENCY ((PER_UNROLL + (PER_UNROLL % 2)) / 2) * FADD_LATENCY
+
+#ifndef INT_UNROLL
+	#define INT_UNROLL 1
+#endif
+
+#define AA(i,j) m[offset * matrix_dim + i * matrix_dim + j + offset]
+#define BB(i,j) m[i * matrix_dim + j]
 
 #include "../common/opencl_kernel_common.h"
 
+__attribute__((max_global_work_dim(0)))
 __kernel void lud_diagonal(__global float* RESTRICT m, 
-                 LMEM_SIZE __local  float* RESTRICT shadow,
                                     int             matrix_dim, 
                                     int             offset)
 { 
 	int i, j, k, l;
-	int sub_matrix_offset;
-	float shift_reg[FADD_LATENCY+1];
+	float shift_reg[DIA_REDUCTION_LATENCY + 1];
 
-	sub_matrix_offset = offset * matrix_dim + offset;
-	for(i = 0; i < BLOCK_SIZE; i++)
+	for (i = 0; i < BSIZE; i++)
 	{
-		for (j = 0; j < BLOCK_SIZE; j++)
-		{
-			shadow[i * BLOCK_SIZE + j] = m[sub_matrix_offset + j];
-		}
-		sub_matrix_offset += matrix_dim;
-	}
-  
-	for(i = 0; i < BLOCK_SIZE-1; i++)
-	{
-		for (j = i+1; j < BLOCK_SIZE; j++)
+		for (j = i; j < BSIZE; j++)
 		{
 			// initiliaze shift register
 			#pragma unroll
-			for (l = 0; l < FADD_LATENCY+1; l++)
+			for (l = 0; l < DIA_REDUCTION_LATENCY + 1; l++)
 			{
 				shift_reg[l] = 0;
 			}
 
-			for(k = 0; k < i; k++)
+			#pragma unroll DIA_UNROLL
+			for (k = 0; k < i; k++)
 			{
-				// reduction
-				shift_reg[FADD_LATENCY] = shift_reg[0] - shadow[j * BLOCK_SIZE + k] * shadow[k * BLOCK_SIZE + i];
+				shift_reg[DIA_REDUCTION_LATENCY] = shift_reg[0] - AA(i, k) * AA(k, j);
 
 				// shifting
 				#pragma unroll
-				for (l = 0; l < FADD_LATENCY; l++)
+				for (l = 0; l < DIA_REDUCTION_LATENCY; l++)
 				{
-					shift_reg[l] = shift_reg[l+1];
+					shift_reg[l] = shift_reg[l + 1];
 				}
 			}
 
 			//final reduction
 			#pragma unroll
-			for (l = 0; l < FADD_LATENCY; l++)
+			for (l = 0; l < DIA_REDUCTION_LATENCY; l++)
 			{
-				shadow[j * BLOCK_SIZE + i] += shift_reg[l];
+				AA(i, j) += shift_reg[l];
 			}
-			shadow[j * BLOCK_SIZE + i] /= shadow[i * BLOCK_SIZE + i];
 		}
-
-		for (j = i+1; j < BLOCK_SIZE; j++)
+   
+		float temp = 1.0f / AA(i,i);
+		for (j = i + 1; j < BSIZE; j++)
 		{
 			// initiliaze shift register
 			#pragma unroll
-			for (l = 0; l < FADD_LATENCY+1; l++)
+			for (l = 0; l < DIA_REDUCTION_LATENCY + 1; l++)
 			{
 				shift_reg[l] = 0;
 			}
 
-			for(k = 0; k < i+1; k++)
+			#pragma unroll DIA_UNROLL
+			for (k = 0; k < i; k++)
 			{
-				// reduction
-				shift_reg[FADD_LATENCY] = shift_reg[0] - shadow[(i+1) * BLOCK_SIZE + k] * shadow[k * BLOCK_SIZE + j];
+				shift_reg[DIA_REDUCTION_LATENCY] = shift_reg[0] - AA(j, k) * AA(k, i);
 
 				// shifting
 				#pragma unroll
-				for (l = 0; l < FADD_LATENCY; l++)
+				for (l = 0; l < DIA_REDUCTION_LATENCY; l++)
 				{
-					shift_reg[l] = shift_reg[l+1];
+					shift_reg[l] = shift_reg[l + 1];
 				}
 			}
 
 			//final reduction
 			#pragma unroll
-			for (l = 0; l < FADD_LATENCY; l++)
+			for (l = 0; l < DIA_REDUCTION_LATENCY; l++)
 			{
-				shadow[(i+1) * BLOCK_SIZE + j] += shift_reg[l];
+				AA(j, i) += shift_reg[l];
 			}
+			AA(j, i) = AA(j, i) * temp;
 		}
-	}
-
-	sub_matrix_offset = (offset+1) * matrix_dim + offset;
-	for(i = 1; i < BLOCK_SIZE; i++)
-	{
-		for (j = 0; j < BLOCK_SIZE; j++)
-		{
-			m[sub_matrix_offset+j] = shadow[i * BLOCK_SIZE + j];
-		}
-		sub_matrix_offset += matrix_dim;
 	}
 }
 
+__attribute__((max_global_work_dim(0)))
 __kernel void lud_perimeter(__global float* RESTRICT m, 
-                  LMEM_SIZE __local  float* RESTRICT dia,
-                  LMEM_SIZE __local  float* RESTRICT peri_row,
-                  LMEM_SIZE __local  float* RESTRICT peri_col,
                                      int             matrix_dim, 
                                      int             offset)
 {
-	int i, j, k, l;
-	int sub_matrix_offset, block_offset;
-	int chunk_id, chunk_num;
-	float shift_reg[FADD_LATENCY+1];
+	int chunk_idx, chunk_num;
+	float shift_reg[PER_REDUCTION_LATENCY + 1];
 
-	chunk_num = ((matrix_dim - offset) / BLOCK_SIZE) - 1;
-	sub_matrix_offset = offset * matrix_dim + offset;
+	chunk_num = ((matrix_dim - offset) / BSIZE) - 1;
 
-	for (chunk_id = 0; chunk_id < chunk_num; chunk_id++)
+	for (chunk_idx = 0; chunk_idx < chunk_num; chunk_idx++)
 	{
-		// load data from global to local memory
-		block_offset = sub_matrix_offset;
-		for (i = 0; i < BLOCK_SIZE; i++)
+		int i, j, k, l, i_global, j_global, i_here, j_here;
+		float sum;           
+		float temp[BSIZE * BSIZE];
+
+		for (i = 0; i < BSIZE; i++)
 		{
-			for (j = 0; j < BLOCK_SIZE; j++)
+			for (j = 0; j < BSIZE; j++)
 			{
-				dia[i * BLOCK_SIZE + j] = m[block_offset + j];
+				temp[i * BSIZE + j] = AA(i, j);
 			}
-			block_offset += matrix_dim;
 		}
 
-		block_offset = sub_matrix_offset + (chunk_id+1) * BLOCK_SIZE;
-		for (i = 0; i < BLOCK_SIZE; i++)
+		i_global = offset;
+		j_global = offset;
+            
+		// processing top perimeter
+		j_global += BSIZE * (chunk_idx + 1);
+		for (j = 0; j < BSIZE; j++)
 		{
-			for (j = 0; j < BLOCK_SIZE; j++)
-			{
-				peri_row[i * BLOCK_SIZE + j] = m[block_offset + j];
-			}
-			block_offset += matrix_dim;
-		}
-
-		block_offset = sub_matrix_offset + (chunk_id+1) * BLOCK_SIZE * matrix_dim;
-		for (i = 0; i < BLOCK_SIZE; i++)
-		{
-			for (j = 0; j < BLOCK_SIZE; j++)
-			{
-				peri_col[i * BLOCK_SIZE + j] = m[block_offset + j];
-			}
-			block_offset += matrix_dim;
-		}
-
-		// compute
-		// peri-row
-		for(i = 1; i < BLOCK_SIZE; i++)
-		{
-			for (j = 0; j < BLOCK_SIZE; j++)
+			for (i = 0; i < BSIZE; i++)
 			{
 				// initiliaze shift register
 				#pragma unroll
-				for (l = 0; l < FADD_LATENCY+1; l++)
+				for (l = 0; l < PER_REDUCTION_LATENCY + 1; l++)
 				{
 					shift_reg[l] = 0;
 				}
 
+				#pragma unroll PER_UNROLL
 				for (k = 0; k < i; k++)
 				{
 					// reduction
-					shift_reg[FADD_LATENCY] = shift_reg[0] - dia[i * BLOCK_SIZE + k] * peri_row[k * BLOCK_SIZE + j];
+					shift_reg[PER_REDUCTION_LATENCY] = shift_reg[0] + temp[BSIZE * i + k] * BB((i_global + k), (j_global + j));
 
 					// shifting
 					#pragma unroll
-					for (l = 0; l < FADD_LATENCY; l++)
+					for (l = 0; l < PER_REDUCTION_LATENCY; l++)
 					{
-						shift_reg[l] = shift_reg[l+1];
+						shift_reg[l] = shift_reg[l + 1];
 					}
 				}
 
 				// final reduction
+				sum = 0.0f;
 				#pragma unroll
-				for (l = 0; l < FADD_LATENCY; l++)
+				for (l = 0; l < PER_REDUCTION_LATENCY; l++)
 				{
-					peri_row[i * BLOCK_SIZE + j] += shift_reg[l];
+					sum += shift_reg[l];
 				}
+
+				i_here = i_global + i;
+				j_here = j_global + j;
+				BB(i_here, j_here) = BB(i_here, j_here) - sum;
 			}
 		}
 
-		// peri-col
-		for(i = 0; i < BLOCK_SIZE; i++)
+		// processing left perimeter
+		j_global = offset;
+		i_global += BSIZE * (chunk_idx + 1);
+		for (i = 0; i < BSIZE; i++)
 		{
-			for (j = 0; j < BLOCK_SIZE; j++)
+			for (j = 0; j < BSIZE; j++)
 			{
 				// initiliaze shift register
 				#pragma unroll
-				for (l = 0; l < FADD_LATENCY+1; l++)
+				for (l = 0; l < PER_REDUCTION_LATENCY + 1; l++)
 				{
 					shift_reg[l] = 0;
 				}
 
-				for(k = 0; k < i; k++)
+				#pragma unroll PER_UNROLL
+				for (k = 0; k < j; k++)
 				{
 					// reduction
-					shift_reg[FADD_LATENCY] = shift_reg[0] - dia[k * BLOCK_SIZE + i] * peri_col[j * BLOCK_SIZE + k];
+					shift_reg[PER_REDUCTION_LATENCY] = shift_reg[0] + BB((i_global + i), (j_global + k)) * temp[BSIZE * k + j];
 
 					// shifting
 					#pragma unroll
-					for (l = 0; l < FADD_LATENCY; l++)
+					for (l = 0; l < PER_REDUCTION_LATENCY; l++)
 					{
-						shift_reg[l] = shift_reg[l+1];
+						shift_reg[l] = shift_reg[l + 1];
 					}
 				}
 
 				// final reduction
+				sum = 0.0f;
 				#pragma unroll
-				for (l = 0; l < FADD_LATENCY; l++)
+				for (l = 0; l < PER_REDUCTION_LATENCY; l++)
 				{
-					peri_col[j * BLOCK_SIZE + i] += shift_reg[l];
+					sum += shift_reg[l];
 				}
-				peri_col[j * BLOCK_SIZE + i] /= dia[i * BLOCK_SIZE+ i];
-			}
-		}
 
-		// write back to global memory
-		// peri-row
-		block_offset = sub_matrix_offset + (chunk_id+1) * BLOCK_SIZE + matrix_dim;
-		for(i = 1; i < BLOCK_SIZE; i++)
-		{
-			for (j = 0; j < BLOCK_SIZE; j++)
-			{
-				m[block_offset + j] = peri_row[i * BLOCK_SIZE + j];
+				i_here = i_global + i;
+				j_here = j_global + j;
+				BB(i_here, j_here) = (BB(i_here, j_here) - sum) / AA(j, j);
 			}
-			block_offset += matrix_dim;
-		}
-
-		// peri-col
-		block_offset = sub_matrix_offset + (chunk_id+1) * BLOCK_SIZE * matrix_dim;
-		for(i = 0; i < BLOCK_SIZE; i++)
-		{
-			for (j = 0; j < BLOCK_SIZE; j++)
-			{
-				m[block_offset + j] = peri_col[i * BLOCK_SIZE + j];
-			}
-			block_offset += matrix_dim;
 		}
 	}
 }
 
+__attribute__((max_global_work_dim(0)))
 __kernel void lud_internal(__global float* RESTRICT m, 
-                 LMEM_SIZE __local  float* RESTRICT peri_row,
-                 LMEM_SIZE __local  float* RESTRICT peri_col,
                                     int             matrix_dim, 
                                     int             offset)
 {
-	int i, j, k, chunk_id_x, chunk_id_y, chunk_num;
-	int sub_matrix_offset, block_offset, block_offset_row, block_offset_col;
-	float sum;
+	int chunk_idx, chunk_num;
 
-	chunk_num = ((matrix_dim - offset) / BLOCK_SIZE) - 1;
-	sub_matrix_offset = offset * matrix_dim + offset;
+	chunk_num = ((matrix_dim - offset) / BSIZE) - 1;
 
-	for (chunk_id_y = 0; chunk_id_y < chunk_num; chunk_id_y++)
+	for  (chunk_idx = 0; chunk_idx < chunk_num * chunk_num; chunk_idx++)
 	{
-		block_offset_col = sub_matrix_offset + (chunk_id_y + 1) * BLOCK_SIZE * matrix_dim;
+		int i, j, k, i_global, j_global;
+		float temp_top[BSIZE * BSIZE];
+		float temp_left[BSIZE * BSIZE];
+		float sum[BSIZE] = {0.0f};
+            
+		i_global = offset + BSIZE * (1 + chunk_idx / chunk_num);
+		j_global = offset + BSIZE * (1 + chunk_idx % chunk_num);
 
-		for (i = 0; i < BLOCK_SIZE; i++)
+		for (i = 0; i < BSIZE; i++)
 		{
-			for (j = 0; j < BLOCK_SIZE; j++)
+			for (j = 0; j < BSIZE; j++)
 			{
-				peri_col[i * BLOCK_SIZE + j] = m[block_offset_col + j];
+				temp_top[i * BSIZE + j]  = m[matrix_dim * (i + offset) + j + j_global];
+				temp_left[i * BSIZE + j] = m[matrix_dim * (i + i_global) + offset + j];
 			}
-			block_offset_col += matrix_dim;
 		}
 
-		for (chunk_id_x = 0; chunk_id_x < chunk_num; chunk_id_x++)
+		for (i = 0; i < BSIZE; i++)
 		{
-			block_offset_row = sub_matrix_offset + (chunk_id_x + 1) * BLOCK_SIZE;
-			block_offset = sub_matrix_offset + (chunk_id_y + 1) * BLOCK_SIZE * matrix_dim + (chunk_id_x + 1) * BLOCK_SIZE;
-
-			for (i = 0; i < BLOCK_SIZE; i++)
+			for (j = 0; j < BSIZE; j++)
 			{
-				for (j = 0; j < BLOCK_SIZE; j++)
+				sum[j] = 0.0f;
+				#pragma unroll
+				for (k = 0; k < BSIZE; k++)
 				{
-					peri_row[i * BLOCK_SIZE + j] = m[block_offset_row + j];
+					sum[j] += temp_left[BSIZE * i + k] * temp_top[BSIZE * k + j];
 				}
-				block_offset_row += matrix_dim;
 			}
 
-			for (i = 0; i < BLOCK_SIZE; i++)
+			#pragma unroll
+			for (j = 0; j < BSIZE; j++)
 			{
-				for (j = 0; j < BLOCK_SIZE; j++)
-				{
-					sum = 0;
-					#pragma unroll
-					for (k = 0; k < BLOCK_SIZE; k++)
-					{
-						sum += peri_col[i * BLOCK_SIZE + k] * peri_row[k * BLOCK_SIZE + j];
-					}
-					m[block_offset + j] -= sum;
-				}
-				block_offset += matrix_dim;
+				BB((i + i_global), (j + j_global)) -= sum[j];
 			}
 		}
 	}

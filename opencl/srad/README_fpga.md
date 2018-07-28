@@ -8,7 +8,7 @@ make Altera=1 BOARD=[board_name]
 
 Host only:
 ```
-make ALTERA=1 HOSTONLY=1
+make ALTERA=1 HOST_ONLY=1
 ```
 
 Custom kernel:

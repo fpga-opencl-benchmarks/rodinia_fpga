@@ -3,6 +3,10 @@
 #include "../../common/timer.h"
 #include "../common/opencl_timer.h"
 
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+	#include "../../common/power_fpga.h"
+#endif
+
 void writeoutput(float *vect, int grid_rows, int grid_cols, char *file) {
 
   int i,j, index=0;
@@ -80,6 +84,16 @@ int compute_tran_temp(cl_mem MatrixPower, cl_mem MatrixTemp[2], int col, int row
   float step = PRECISION / max_slope;
 
   int src = 0, dst = 1;
+
+  TimeStamp compute_start, compute_end;
+  double computeTime;
+  
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+  // power measurement parameters, only for Bittware's A10PL4 board
+  int flag = 0;
+  double power = 0;
+  double energy = 0;
+#endif
   
   cl_mem boundary; // for v11
   
@@ -91,159 +105,190 @@ int compute_tran_temp(cl_mem MatrixPower, cl_mem MatrixTemp[2], int col, int row
   }
 
   CL_SAFE_CALL(clFinish(command_queue));
-  
-  TimeStamp start_time;
-  GetTime(start_time);
 
-  if (is_ndrange_kernel(version_number))
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+  #pragma omp parallel num_threads(2) shared(flag)
   {
-    // Determine GPU work group grid
-    size_t global_work_size[2];
-    global_work_size[0] = block_size * blockCols;
-    global_work_size[1] = block_size * blockRows;
-    size_t local_work_size[2];
-    local_work_size[0] = block_size;
-    local_work_size[1] = block_size;
-    
-    if (version_number == 4)
+    if (omp_get_thread_num() == 0)
     {
-      float step_div_Cap=step/Cap;
-      float Rx_1=1/Rx;
-      float Ry_1=1/Ry;
-      float Rz_1=1/Rz;
-
-      clSetKernelArg(kernel, 0 , sizeof(cl_mem), (void *) &MatrixPower);
-      clSetKernelArg(kernel, 3 , sizeof(int)   , (void *) &col);
-      clSetKernelArg(kernel, 4 , sizeof(int)   , (void *) &row);
-      clSetKernelArg(kernel, 5 , sizeof(float) , (void *) &step_div_Cap);
-      clSetKernelArg(kernel, 6 , sizeof(float) , (void *) &Rx_1);
-      clSetKernelArg(kernel, 7 , sizeof(float) , (void *) &Ry_1);
-      clSetKernelArg(kernel, 8 , sizeof(float) , (void *) &Rz_1);
+      power = GetPowerFPGA(&flag);
     }
     else
     {
-      clSetKernelArg(kernel, 1 , sizeof(cl_mem), (void *) &MatrixPower);
-      clSetKernelArg(kernel, 4 , sizeof(int)   , (void *) &col);
-      clSetKernelArg(kernel, 5 , sizeof(int)   , (void *) &row);
-      clSetKernelArg(kernel, 6 , sizeof(int)   , (void *) &borderCols);
-      clSetKernelArg(kernel, 7 , sizeof(int)   , (void *) &borderRows);
-      clSetKernelArg(kernel, 8 , sizeof(float) , (void *) &Cap);
-      clSetKernelArg(kernel, 9 , sizeof(float) , (void *) &Rx);
-      clSetKernelArg(kernel, 10, sizeof(float) , (void *) &Ry);
-      clSetKernelArg(kernel, 11, sizeof(float) , (void *) &Rz);
-      clSetKernelArg(kernel, 12, sizeof(float) , (void *) &step);
-    }
+      #pragma omp barrier
+#endif
+      // beginning of timing point
+      GetTime(compute_start);
 
-    int t;
-    for (t = 0; t < total_iterations; t += num_iterations)
-    {
-      int iter = MIN(num_iterations, total_iterations - t);
-
-      if (version_number == 4)
+      if (is_ndrange_kernel(version_number))
       {
-        clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *) &MatrixTemp[src]);
-        clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *) &MatrixTemp[dst]);
+        // Determine GPU work group grid
+        size_t global_work_size[2];
+        global_work_size[0] = block_size * blockCols;
+        global_work_size[1] = block_size * blockRows;
+        size_t local_work_size[2];
+        local_work_size[0] = block_size;
+        local_work_size[1] = block_size;
+
+        if (version_number == 4)
+        {
+          float step_div_Cap=step/Cap;
+          float Rx_1=1/Rx;
+          float Ry_1=1/Ry;
+          float Rz_1=1/Rz;
+
+          clSetKernelArg(kernel, 0 , sizeof(cl_mem), (void *) &MatrixPower);
+          clSetKernelArg(kernel, 3 , sizeof(int)   , (void *) &col);
+          clSetKernelArg(kernel, 4 , sizeof(int)   , (void *) &row);
+          clSetKernelArg(kernel, 5 , sizeof(float) , (void *) &step_div_Cap);
+          clSetKernelArg(kernel, 6 , sizeof(float) , (void *) &Rx_1);
+          clSetKernelArg(kernel, 7 , sizeof(float) , (void *) &Ry_1);
+          clSetKernelArg(kernel, 8 , sizeof(float) , (void *) &Rz_1);
+        }
+        else
+        {
+          clSetKernelArg(kernel, 1 , sizeof(cl_mem), (void *) &MatrixPower);
+          clSetKernelArg(kernel, 4 , sizeof(int)   , (void *) &col);
+          clSetKernelArg(kernel, 5 , sizeof(int)   , (void *) &row);
+          clSetKernelArg(kernel, 6 , sizeof(int)   , (void *) &borderCols);
+          clSetKernelArg(kernel, 7 , sizeof(int)   , (void *) &borderRows);
+          clSetKernelArg(kernel, 8 , sizeof(float) , (void *) &Cap);
+          clSetKernelArg(kernel, 9 , sizeof(float) , (void *) &Rx);
+          clSetKernelArg(kernel, 10, sizeof(float) , (void *) &Ry);
+          clSetKernelArg(kernel, 11, sizeof(float) , (void *) &Rz);
+          clSetKernelArg(kernel, 12, sizeof(float) , (void *) &step);
+        }
+
+        int t;
+        for (t = 0; t < total_iterations; t += num_iterations)
+        {
+          int iter = MIN(num_iterations, total_iterations - t);
+
+          if (version_number == 4)
+          {
+            clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *) &MatrixTemp[src]);
+            clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *) &MatrixTemp[dst]);
+          }
+          else
+          {
+            clSetKernelArg(kernel, 0, sizeof(int), (void *) &iter);
+            clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *) &MatrixTemp[src]);
+            clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *) &MatrixTemp[dst]);
+          }
+
+          // Launch kernel
+          cl_int error = clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL);
+          if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
+
+          src = 1 - src;
+          dst = 1 - dst;
+        }
       }
       else
       {
-        clSetKernelArg(kernel, 0, sizeof(int), (void *) &iter);
-        clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *) &MatrixTemp[src]);
-        clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *) &MatrixTemp[dst]);
+        // Using the single work-item versions.
+        // All iterations are computed by a single kernel execution.
+        // borderCols and borderRows are not used in these versions, so
+        // they are not passed.
+        if (version_number >= 11)
+        {
+          float step_div_Cap=step/Cap;
+          float Rx_1=1/Rx;
+          float Ry_1=1/Ry;
+          float Rz_1=1/Rz;
+
+          clSetKernelArg(kernel_even, 0, sizeof(cl_mem), (void *) &MatrixPower);
+          clSetKernelArg(kernel_even, 2, sizeof(int)   , (void *) &col);
+          clSetKernelArg(kernel_even, 3, sizeof(int)   , (void *) &row);
+          clSetKernelArg(kernel_even, 4, sizeof(float) , (void *) &step_div_Cap);
+          clSetKernelArg(kernel_even, 5, sizeof(float) , (void *) &Rx_1);
+          clSetKernelArg(kernel_even, 6, sizeof(float) , (void *) &Ry_1);
+          clSetKernelArg(kernel_even, 7, sizeof(float) , (void *) &Rz_1);
+          clSetKernelArg(kernel_even, 8, sizeof(cl_mem), (void *) &boundary);
+
+          clSetKernelArg(kernel_odd , 0, sizeof(cl_mem), (void *) &MatrixPower);
+          clSetKernelArg(kernel_odd , 2, sizeof(int)   , (void *) &col);
+          clSetKernelArg(kernel_odd , 3, sizeof(int)   , (void *) &row);
+          clSetKernelArg(kernel_odd , 4, sizeof(float) , (void *) &step_div_Cap);
+          clSetKernelArg(kernel_odd , 5, sizeof(float) , (void *) &Rx_1);
+          clSetKernelArg(kernel_odd , 6, sizeof(float) , (void *) &Ry_1);
+          clSetKernelArg(kernel_odd , 7, sizeof(float) , (void *) &Rz_1);
+          clSetKernelArg(kernel_odd , 8, sizeof(cl_mem), (void *) &boundary);
+        }
+        else
+        {
+          clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *) &MatrixPower);
+          clSetKernelArg(kernel, 3, sizeof(int),    (void *) &col);
+          clSetKernelArg(kernel, 4, sizeof(int),    (void *) &row);
+          clSetKernelArg(kernel, 5, sizeof(float),  (void *) &Cap);
+          clSetKernelArg(kernel, 6, sizeof(float),  (void *) &Rx);
+          clSetKernelArg(kernel, 7, sizeof(float),  (void *) &Ry);
+          clSetKernelArg(kernel, 8, sizeof(float),  (void *) &Rz);
+          clSetKernelArg(kernel, 9, sizeof(float),  (void *) &step);
+        }
+
+        // Launch kernel
+        int t;
+        if (version_number >= 11)
+        {
+          for (t = 0; t < total_iterations; t += 2) // in this version two iterations are launched simultaneously, hence total iteration number is halved
+          {
+            int rem_iter = total_iterations-t;
+            clSetKernelArg(kernel_even, 1, sizeof(cl_mem), (void *) &MatrixTemp[src]);
+            clSetKernelArg(kernel_odd , 1, sizeof(cl_mem), (void *) &MatrixTemp[dst]);
+
+            // pass number of remaining iterations to correctly handle cases where number of iterations is an odd number
+            clSetKernelArg(kernel_even, 9, sizeof(int)   , (void *) &rem_iter);
+            clSetKernelArg(kernel_odd , 9, sizeof(int)   , (void *) &rem_iter);
+
+            CL_SAFE_CALL(clEnqueueTask(command_queue , kernel_even, 0, NULL, NULL));
+            CL_SAFE_CALL(clEnqueueTask(command_queue2, kernel_odd , 0, NULL, NULL));
+
+            clFinish(command_queue2); // this is necessary since the two kernels are running in two different queue and a new iteration should not start before the previous one finishes
+
+            src = 1 - src;
+            dst = 1 - dst;
+          }
+        }
+        else
+        {
+          for (t = 0; t < total_iterations; ++t)
+          {
+            clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *) &MatrixTemp[src]);
+            clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *) &MatrixTemp[dst]);
+            CL_SAFE_CALL(clEnqueueTask(command_queue, kernel, 0, NULL, NULL));
+            src = 1 - src;
+            dst = 1 - dst;
+          }
+        }
       }
 
-      // Launch kernel
-      cl_int error = clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL);
-      if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
+      // Wait for all operations to finish
+      CL_SAFE_CALL(clFinish(command_queue));
 
-      src = 1 - src;
-      dst = 1 - dst;
+      GetTime(compute_end);
+      
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+      flag = 1;
     }
+  }
+#endif
+
+  computeTime = TimeDiff(compute_start, compute_end);
+  printf("\nComputation done in %0.3lf ms.\n", computeTime);
+
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+  energy = GetEnergyFPGA(power, computeTime);
+  if (power != -1) // -1 --> sensor read failure
+  {
+    printf("Total energy used is %0.3lf jouls.\n", energy);
+    printf("Average power consumption is %0.3lf watts.\n", power);
   }
   else
   {
-    // Using the single work-item versions.
-    // All iterations are computed by a single kernel execution.
-    // borderCols and borderRows are not used in these versions, so
-    // they are not passed.
-    if (version_number >= 11)
-    {
-      float step_div_Cap=step/Cap;
-      float Rx_1=1/Rx;
-      float Ry_1=1/Ry;
-      float Rz_1=1/Rz;
-
-      clSetKernelArg(kernel_even, 0, sizeof(cl_mem), (void *) &MatrixPower);
-      clSetKernelArg(kernel_even, 2, sizeof(int)   , (void *) &col);
-      clSetKernelArg(kernel_even, 3, sizeof(int)   , (void *) &row);
-      clSetKernelArg(kernel_even, 4, sizeof(float) , (void *) &step_div_Cap);
-      clSetKernelArg(kernel_even, 5, sizeof(float) , (void *) &Rx_1);
-      clSetKernelArg(kernel_even, 6, sizeof(float) , (void *) &Ry_1);
-      clSetKernelArg(kernel_even, 7, sizeof(float) , (void *) &Rz_1);
-      clSetKernelArg(kernel_even, 8, sizeof(cl_mem), (void *) &boundary);
-
-      clSetKernelArg(kernel_odd , 0, sizeof(cl_mem), (void *) &MatrixPower);
-      clSetKernelArg(kernel_odd , 2, sizeof(int)   , (void *) &col);
-      clSetKernelArg(kernel_odd , 3, sizeof(int)   , (void *) &row);
-      clSetKernelArg(kernel_odd , 4, sizeof(float) , (void *) &step_div_Cap);
-      clSetKernelArg(kernel_odd , 5, sizeof(float) , (void *) &Rx_1);
-      clSetKernelArg(kernel_odd , 6, sizeof(float) , (void *) &Ry_1);
-      clSetKernelArg(kernel_odd , 7, sizeof(float) , (void *) &Rz_1);
-      clSetKernelArg(kernel_odd , 8, sizeof(cl_mem), (void *) &boundary);
-    }
-    else
-    {
-      clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *) &MatrixPower);
-      clSetKernelArg(kernel, 3, sizeof(int),    (void *) &col);
-      clSetKernelArg(kernel, 4, sizeof(int),    (void *) &row);
-      clSetKernelArg(kernel, 5, sizeof(float),  (void *) &Cap);
-      clSetKernelArg(kernel, 6, sizeof(float),  (void *) &Rx);
-      clSetKernelArg(kernel, 7, sizeof(float),  (void *) &Ry);
-      clSetKernelArg(kernel, 8, sizeof(float),  (void *) &Rz);
-      clSetKernelArg(kernel, 9, sizeof(float),  (void *) &step);
-    }
-
-    // Launch kernel
-    int t;
-    if (version_number >= 11)
-    {
-      for (t = 0; t < total_iterations; t += 2) // in this version two iterations are launched simultaneously, hence total iteration number is halved
-      {
-        int rem_iter = total_iterations-t;
-        clSetKernelArg(kernel_even, 1, sizeof(cl_mem), (void *) &MatrixTemp[src]);
-        clSetKernelArg(kernel_odd , 1, sizeof(cl_mem), (void *) &MatrixTemp[dst]);
-
-	// pass number of remaining iterations to correctly handle cases where number of iterations is an odd number
-	clSetKernelArg(kernel_even, 9, sizeof(int)   , (void *) &rem_iter);
-	clSetKernelArg(kernel_odd , 9, sizeof(int)   , (void *) &rem_iter);
-
-        CL_SAFE_CALL(clEnqueueTask(command_queue , kernel_even, 0, NULL, NULL));
-        CL_SAFE_CALL(clEnqueueTask(command_queue2, kernel_odd , 0, NULL, NULL));
-
-        clFinish(command_queue2); // this is necessary since the two kernels are running in two different queue and a new iteration should not start before the previous one finishes
-
-        src = 1 - src;
-        dst = 1 - dst;
-      }
-    }
-    else
-    {
-      for (t = 0; t < total_iterations; ++t)
-      {
-        clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *) &MatrixTemp[src]);
-        clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *) &MatrixTemp[dst]);
-        CL_SAFE_CALL(clEnqueueTask(command_queue, kernel, 0, NULL, NULL));
-        src = 1 - src;
-        dst = 1 - dst;
-      }
-    }
+    printf("Failed to read power values from the sensor!\n");
   }
-
-  // Wait for all operations to finish
-  CL_SAFE_CALL(clFinish(command_queue));
-
-  TimeStamp end_time;
-  GetTime(end_time);
-  printf("\nComputation done in %0.3lf ms.\n", TimeDiff(start_time, end_time));
+#endif
   
   if (version_number >= 11)
   {
@@ -280,6 +325,8 @@ int main(int argc, char** argv) {
   display_device_info(&platforms, &platformCount);
   select_device_type(platforms, &platformCount, &device_type);
   validate_selection(platforms, &platformCount, ctxprop, &device_type);
+  
+  TimeStamp total_start, total_end;
 
   // create OpenCL context
   context = clCreateContextFromType( ctxprop, device_type, NULL, NULL, &error );
@@ -409,8 +456,7 @@ int main(int argc, char** argv) {
     if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
   }
 
-  TimeStamp start_time;
-  GetTime(start_time);
+  GetTime(total_start);
 
   // Create two temperature matrices and copy the temperature input data
   cl_mem MatrixTemp[2];
@@ -437,9 +483,8 @@ int main(int argc, char** argv) {
   float *MatrixOut = (float*)alignedMalloc(sizeof(float) * size);
   CL_SAFE_CALL(clEnqueueReadBuffer(command_queue, MatrixTemp[ret], CL_TRUE, 0, sizeof(float) * size, MatrixOut, 0, NULL, NULL));
 
-  TimeStamp end_time;
-  GetTime(end_time);
-  printf("Total run time was %f ms.\n", TimeDiff(start_time, end_time));
+  GetTime(total_end);
+  printf("Total run time was %f ms.\n", TimeDiff(total_start, total_end));
 
   // Write final output to output file
   writeoutput(MatrixOut, grid_rows, grid_cols, ofile);

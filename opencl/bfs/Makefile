@@ -13,7 +13,7 @@ KERNEL_NAMES = $(foreach var,$(VERSIONS),$(NAME)_kernel_v$(var))
 KERNEL_ALTERA_NAMES = $(addsuffix .aocx, $(KERNEL_NAMES))
 
 ifdef ALTERA
-	ifdef HOSTONLY
+	ifdef HOST_ONLY
 		AOT_PROGRAMS = 
 	else
 		AOT_PROGRAMS = $(KERNEL_ALTERA_NAMES)

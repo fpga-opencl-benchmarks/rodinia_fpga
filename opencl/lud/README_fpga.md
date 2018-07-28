@@ -8,7 +8,7 @@ make Altera=1 BOARD=[board_name]
 
 Host only:
 ```
-make ALTERA=1 HOSTONLY=1
+make ALTERA=1 HOST_ONLY=1
 ```
 
 Custom kernel:
@@ -29,11 +29,11 @@ Default run:
 Custom run:
 
 ```
-./lud -i [input_file] v[version_number]
+./lud -i [input_file] -b [block_size] v[version_number]
 
 or
 
-./lud -s [input_size] v[version_number]
+./lud -s [input_size] -b [block_size] v[version_number]
 ```
 
 
@@ -56,7 +56,7 @@ Uses Altera's shit register method for efficient reduction.
 
 ## v4 (Best)
 
-Parameters: BLOCK_SZIE, DIA_UNROLL, PERI_UNROLL, PERI_SIMD, PERI_COMPUTE, INTER_SIMD, INTER_COMPUTE
+Parameters: BSZIE, DIA_UNROLL, PERI_UNROLL, PERI_SIMD, PERI_COMPUTE, INTER_SIMD, INTER_COMPUTE
 
 Compared to v2, increases block size, uses unrolling for the diameter and
 perimeter kernels and multiple compute units for the perimeter and internal
@@ -98,7 +98,7 @@ does not work well with this algorithm and even this v5 performs horribly.
 
 ## v6
 
-Parameters: BLOCK_SZIE, DIA_UNROLL, PERI_UNROLL, PERI_SIMD, PERI_COMPUTE, INTER_SIMD, INTER_COMPUTE
+Parameters: BSIZE, DIA_UNROLL, PERI_UNROLL, PERI_SIMD, PERI_COMPUTE, INTER_SIMD, INTER_COMPUTE
 
 This version changes the way the buffers are loaded from off-chip memory to un-chip
 memory in the perimeter kernel to remove thread-id-dependent branching and merge the
@@ -117,7 +117,7 @@ run time not being substantial enough to make up for the lower operating frequen
 
 ## v8
 
-Parameters: BLOCK_SZIE, DIA_UNROLL, PERI_UNROLL, PERI_SIMD, PERI_COMPUTE, INTER_SIMD, INTER_COMPUTE
+Parameters: BSIZE, DIA_UNROLL, PERI_UNROLL, PERI_SIMD, PERI_COMPUTE, INTER_SIMD, INTER_COMPUTE
 
 This kernel breaks the perimeter kernel into two kernels, one performing the peri_row
 computation and the other performing peri_col, but instead of running them sequentially,

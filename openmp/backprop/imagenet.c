@@ -3,9 +3,9 @@
 #include <stdlib.h>
 #include "backprop.h"
 
-extern layer_size;
+extern int layer_size;
 
-load(net)
+void load(net)
 BPNN *net;
 {
   float *units;

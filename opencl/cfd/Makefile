@@ -16,6 +16,10 @@ all: $(EXE)
 CXXFLAGS += $(KERNEL_DIM) $(OPENCL_INC)
 LDFLAGS += $(OPENCL_LIB)
 
+ifeq ($(BOARD),a10pl4_dd4gb_gx115es3)
+	LDFLAGS += $(BITTWARE_LIB) -fopenmp
+endif
+
 euler3d: euler3d.o host_common.o CLHelper2.o
 	$(CXX) $^ -o $@ $(LDFLAGS)
 

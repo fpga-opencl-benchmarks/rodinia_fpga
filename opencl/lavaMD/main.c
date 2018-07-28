@@ -41,6 +41,8 @@ extern "C" {
 #include <stdio.h>					// (in path known to compiler)			needed by printf
 #include <stdlib.h>					// (in path known to compiler)			needed by malloc
 #include <stdbool.h>				// (in path known to compiler)			needed by true/false
+#include <string.h>					// (in path known to compiler)			needed by strcmp
+#include <time.h>					// (in path known to compiler)			needed by time
 
 //======================================================================================================================================================150
 //	UTILITIES
@@ -48,6 +50,7 @@ extern "C" {
 
 #include "./util/timer/timer.h"			// (in path specified here)
 #include "./util/num/num.h"				// (in path specified here)
+#include "../common/opencl_util.h"
 
 //======================================================================================================================================================150
 //	MAIN FUNCTION HEADER
@@ -74,7 +77,10 @@ main(	int argc,
 	//	CPU/MCPU VARIABLES
 	//======================================================================================================================================================150
 
-	// timer
+	int version;
+	init_fpga(&argc, &argv, &version);
+
+	/*// timer
 	long long time0;
 
 	time0 = get_time();
@@ -86,7 +92,7 @@ main(	int argc,
 	long long time4;
 	long long time5;
 	long long time6;
-	long long time7;
+	long long time7;*/
 
 	// counters
 	int i, j, k, l, m, n;
@@ -103,7 +109,7 @@ main(	int argc,
 
 	printf("WG size of kernel = %d \n", NUMBER_THREADS);
 
-	time1 = get_time();
+	//time1 = get_time();
 
 	//======================================================================================================================================================150
 	//	CHECK INPUT ARGUMENTS
@@ -156,7 +162,7 @@ main(	int argc,
 		return 0;
 	}
 
-	time2 = get_time();
+	//time2 = get_time();
 
 	//======================================================================================================================================================150
 	//	INPUTS
@@ -164,7 +170,7 @@ main(	int argc,
 
 	par_cpu.alpha = 0.5;
 
-	time3 = get_time();
+	//time3 = get_time();
 
 	//======================================================================================================================================================150
 	//	DIMENSIONS
@@ -181,7 +187,7 @@ main(	int argc,
 	// box array
 	dim_cpu.box_mem = dim_cpu.number_boxes * sizeof(box_str);
 
-	time4 = get_time();
+	//time4 = get_time();
 
 	//======================================================================================================================================================150
 	//	SYSTEM MEMORY
@@ -192,7 +198,7 @@ main(	int argc,
 	//====================================================================================================100
 
 	// allocate boxes
-	box_cpu = (box_str*)malloc(dim_cpu.box_mem);
+	box_cpu = (box_str*)alignedMalloc(dim_cpu.box_mem);
 
 	// initialize number of home boxes
 	nh = 0;
@@ -255,10 +261,14 @@ main(	int argc,
 	//====================================================================================================100
 
 	// random generator seed set to random value - time in this case
+#ifdef OUTPUT
+	srand(10);
+#else
 	srand(time(NULL));
+#endif
 
 	// input (distances)
-	rv_cpu = (FOUR_VECTOR*)malloc(dim_cpu.space_mem);
+	rv_cpu = (FOUR_VECTOR*)alignedMalloc(dim_cpu.space_mem);
 	for(i=0; i<dim_cpu.space_elem; i=i+1){
 		rv_cpu[i].v = (rand()%10 + 1) / 10.0;			// get a number in the range 0.1 - 1.0
 		// rv_cpu[i].v = 0.1;			// get a number in the range 0.1 - 1.0
@@ -271,14 +281,14 @@ main(	int argc,
 	}
 
 	// input (charge)
-	qv_cpu = (fp*)malloc(dim_cpu.space_mem2);
+	qv_cpu = (fp*)alignedMalloc(dim_cpu.space_mem2);
 	for(i=0; i<dim_cpu.space_elem; i=i+1){
 		qv_cpu[i] = (rand()%10 + 1) / 10.0;			// get a number in the range 0.1 - 1.0
 		// qv_cpu[i] = 0.5;			// get a number in the range 0.1 - 1.0
 	}
 
 	// output (forces)
-	fv_cpu = (FOUR_VECTOR*)malloc(dim_cpu.space_mem);
+	fv_cpu = (FOUR_VECTOR*)alignedMalloc(dim_cpu.space_mem);
 	for(i=0; i<dim_cpu.space_elem; i=i+1){
 		fv_cpu[i].v = 0;								// set to 0, because kernels keeps adding to initial value
 		fv_cpu[i].x = 0;								// set to 0, because kernels keeps adding to initial value
@@ -286,7 +296,7 @@ main(	int argc,
 		fv_cpu[i].z = 0;								// set to 0, because kernels keeps adding to initial value
 	}
 
-	time5 = get_time();
+	//time5 = get_time();
 
 	//======================================================================================================================================================150
 	//	KERNEL
@@ -301,9 +311,10 @@ main(	int argc,
 								box_cpu,
 								rv_cpu,
 								qv_cpu,
-								fv_cpu);
+								fv_cpu,
+								version);
 
-	time6 = get_time();
+	//time6 = get_time();
 
 	//======================================================================================================================================================150
 	//	SYSTEM MEMORY DEALLOCATION
@@ -325,7 +336,7 @@ main(	int argc,
 	free(fv_cpu);
 	free(box_cpu);
 
-	time7 = get_time();
+	//time7 = get_time();
 
 	//======================================================================================================================================================150
 	//	DISPLAY TIMING

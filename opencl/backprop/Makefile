@@ -1,23 +1,36 @@
 include ../../common/make.config
 
-# C compiler
-CC = g++
-CC_FLAGS = -g -O2 
+NAME = backprop
+ifeq ($(OS),Windows_NT)
+	EXE = $(NAME).exe
+else
+	EXE = $(NAME)
+endif
+SRC = backprop_ocl.cpp backprop.c facetrain.c imagenet.c
 
-backprop: backprop.o imagenet.o facetrain.o
-	$(CC) $(CC_FLAGS) backprop_ocl.cpp backprop.o imagenet.o facetrain.o -o backprop -I$(OPENCL_INC) -L$(OPENCL_LIB) -lOpenCL
+ifdef OUTPUT
+	EXTRA_FLAGS += -DOUTPUT
+endif
 
-%.o: %.[ch]
-	$(CC) $(CC_FLAGS) $< -c
-	
-backprop.o: backprop.c 
-	$(CC) $(CC_FLAGS) backprop.c -c
-	
-facetrain.o: facetrain.c
-	$(CC) $(CC_FLAGS) facetrain.c -c
+ifdef ALTERA
+	ifdef HOST_ONLY
+		AOT_PROGRAMS = 
+	else
+		AOT_PROGRAMS = $(KERNEL_ALTERA_NAMES)
+	endif
+else
+	AOT_PROGRAMS =
+endif
 
-imagenet.o: imagenet.c
-	$(CC) $(CC_FLAGS) imagenet.c -c
+EXTRA_FLAGS += -Wno-unused-result
+
+all: $(EXE) $(AOT_PROGRAMS)
+
+profile: CFLAGS += -DPROFILE
+profile: $(EXE) $(AOT_PROGRAMS)
+
+$(EXE): $(SRC)
+	$(CXX) $(CFLAGS) $(SRC) -o $(EXE) $(OPENCL_INC) $(OPENCL_LIB) $(EXTRA_FLAGS)
 
 clean:
-	rm -f *.o *~ backprop *.linkinfo
+	$(RM) $(EXE) *.aoco *.aocx $(KERNEL_NAMES)

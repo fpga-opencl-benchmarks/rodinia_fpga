@@ -1,11 +1,11 @@
 #include "../common/opencl_kernel_common.h"
 
 #define REDUCE_LATENCY 8
-#define BLOCK_SIZE 8
-#define BLOCK_SIZE_LOG 3
+#define BSIZE 8
+#define BSIZE_LOG 3
 
 #define GA(i,j,block_offset) block_offset + i*size + j						// calculates global address in the matrix
-#define LA(i,j)              (i << BLOCK_SIZE_LOG) + j						// calculates local address in the block
+#define LA(i,j)              (i << BSIZE_LOG) + j						// calculates local address in the block
 
 __kernel void lud(__global float* RESTRICT a, int size)
 {
@@ -14,9 +14,9 @@ __kernel void lud(__global float* RESTRICT a, int size)
 	int chunk_id, chunk_id_x, chunk_id_y, chunk_size;
 	float shift_reg1[REDUCE_LATENCY+1], shift_reg2[REDUCE_LATENCY+1];
 	float sum, temp;
-	float mem_dia[BLOCK_SIZE*BLOCK_SIZE], mem_row[BLOCK_SIZE*BLOCK_SIZE], mem_col[BLOCK_SIZE*BLOCK_SIZE];
+	float mem_dia[BSIZE*BSIZE], mem_row[BSIZE*BSIZE], mem_col[BSIZE*BSIZE];
 
-	for (offset = 0; offset < size; offset = offset + BLOCK_SIZE)
+	for (offset = 0; offset < size; offset = offset + BSIZE)
 	{
 		block_offset = offset*size + offset;						// the block is always on the main diagonal
 
@@ -25,19 +25,19 @@ __kernel void lud(__global float* RESTRICT a, int size)
 		//======================================================================
 
 		// loading block into on-chip memory
-		for (i = 0; i < BLOCK_SIZE; i++)
+		for (i = 0; i < BSIZE; i++)
 		{
 			#pragma unroll
-			for (j = 0; j < BLOCK_SIZE; j++)
+			for (j = 0; j < BSIZE; j++)
 			{
 				mem_dia[LA(i,j)] = a[GA(i,j,block_offset)];
 			}
 		}
 
 		// computation on block
-		for (i = 0; i < BLOCK_SIZE; i++)
+		for (i = 0; i < BSIZE; i++)
 		{
-			for (j = 0; j < BLOCK_SIZE; j++)
+			for (j = 0; j < BSIZE; j++)
 			{
 				// initiliaze shift register
 				#pragma unroll
@@ -46,7 +46,7 @@ __kernel void lud(__global float* RESTRICT a, int size)
 					shift_reg1[m] = 0;
 				}
 
-				for (k = 0; k < BLOCK_SIZE; k++)
+				for (k = 0; k < BSIZE; k++)
 				{
 					// reduction
 					if (j >= i && k < i)
@@ -76,7 +76,7 @@ __kernel void lud(__global float* RESTRICT a, int size)
 
 			// in the next loop, the value of mem_dia[LA(i,i)] is fixed (for each i) and is reused j times and never overwritten
 			temp = mem_dia[LA(i,i)];
-			for (j = 0; j < BLOCK_SIZE; j++)
+			for (j = 0; j < BSIZE; j++)
 			{
 				// initiliaze shift register
 				#pragma unroll
@@ -85,7 +85,7 @@ __kernel void lud(__global float* RESTRICT a, int size)
 					shift_reg1[m] = 0;
 				}
 
-				for (k = 0; k < BLOCK_SIZE; k++)
+				for (k = 0; k < BSIZE; k++)
 				{
 					// reduction
 					if (j >= i+1 && k < i)
@@ -125,10 +125,10 @@ __kernel void lud(__global float* RESTRICT a, int size)
 		}
 
 		// writing back to global memory
-		for (i = 1; i < BLOCK_SIZE; i++)						// first row is unchanged, we will not write it back
+		for (i = 1; i < BSIZE; i++)						// first row is unchanged, we will not write it back
 		{
 			#pragma unroll
-			for (j = 0; j < BLOCK_SIZE; j++)
+			for (j = 0; j < BSIZE; j++)
 			{
 				a[GA(i,j,block_offset)] = mem_dia[LA(i,j)];
 			}
@@ -142,23 +142,23 @@ __kernel void lud(__global float* RESTRICT a, int size)
 		// we want to process two perimeter blocks in parallel, one in the current row and one in the current column
 		// reason why we use two separate local buffers
 
-		chunk_size = ((size - offset) >> BLOCK_SIZE_LOG) - 1;				// offset starts from zero, hence the "-1"
+		chunk_size = ((size - offset) >> BSIZE_LOG) - 1;				// offset starts from zero, hence the "-1"
 		for (chunk_id = 0; chunk_id < chunk_size; chunk_id++)
 		{
-			block_offset_row = block_offset + ((chunk_id+1) << BLOCK_SIZE_LOG);	// chunk_id starts from zero, hence the "+1"
-			block_offset_col = block_offset + ((chunk_id+1) << BLOCK_SIZE_LOG) * size;
+			block_offset_row = block_offset + ((chunk_id+1) << BSIZE_LOG);	// chunk_id starts from zero, hence the "+1"
+			block_offset_col = block_offset + ((chunk_id+1) << BSIZE_LOG) * size;
 
 			// loading two block into on-chip memory
 			// two separate loops on j are used here to ensure correct coalescing
-			for (i = 0; i < BLOCK_SIZE; i++)
+			for (i = 0; i < BSIZE; i++)
 			{
 				#pragma unroll
-				for (j = 0; j < BLOCK_SIZE; j++)
+				for (j = 0; j < BSIZE; j++)
 				{
 					mem_row[LA(i,j)] = a[GA(i,j,block_offset_row)];		// the "chunk_id+1"th block to the right of the current diagonal block
 				}
 				#pragma unroll
-				for (j = 0; j < BLOCK_SIZE; j++)
+				for (j = 0; j < BSIZE; j++)
 				{
 					mem_col[LA(i,j)] = a[GA(i,j,block_offset_col)];		// the "chunk_id+1"th block to the bottom of the current diagonal block
 				}
@@ -168,16 +168,16 @@ __kernel void lud(__global float* RESTRICT a, int size)
 			// ...is applied on mem_col, we take the computation of i == 0 out of the second loop and put it here
 			// ...to avoid all the unneeded shifting and everything on the shift registers, and start the second loop from i = 1
 			temp = mem_dia[LA(0,0)];						// i = 0
-			for (j = 0; j < BLOCK_SIZE; j++)
+			for (j = 0; j < BSIZE; j++)
 			{
 				mem_col[LA(j,0)] = mem_col[LA(j,0)]/temp;
 			}
 
-			for (i = 1; i < BLOCK_SIZE; i++)
+			for (i = 1; i < BSIZE; i++)
 			{
 				// same as before, the value of mem_dia[LA(i,i)] is fixed (for each i) and is reused j times and never overwritten
 				temp = mem_dia[LA(i,i)];
-				for (j = 0; j < BLOCK_SIZE; j++)
+				for (j = 0; j < BSIZE; j++)
 				{
 					// initiliaze shift register
 					#pragma unroll
@@ -187,7 +187,7 @@ __kernel void lud(__global float* RESTRICT a, int size)
 						shift_reg2[m] = 0;
 					}
 
-					for (k = 0; k < BLOCK_SIZE; k++)
+					for (k = 0; k < BSIZE; k++)
 					{
 						// reduction
 						if (k < i)
@@ -223,18 +223,18 @@ __kernel void lud(__global float* RESTRICT a, int size)
 			}
 
 			// writing back to global memory
-			for (i = 1; i < BLOCK_SIZE; i++)						// first row has not changed, hence we start from i = 1
+			for (i = 1; i < BSIZE; i++)						// first row has not changed, hence we start from i = 1
 			{
 				#pragma unroll
-				for (j = 0; j < BLOCK_SIZE; j++)
+				for (j = 0; j < BSIZE; j++)
 				{
 					a[GA(i,j,block_offset_row)] = mem_row[LA(i,j)];
 				}
 			}
-			for (i = 0; i < BLOCK_SIZE; i++)
+			for (i = 0; i < BSIZE; i++)
 			{
 				#pragma unroll
-				for (j = 0; j < BLOCK_SIZE; j++)
+				for (j = 0; j < BSIZE; j++)
 				{
 					a[GA(i,j,block_offset_col)] = mem_col[LA(i,j)];
 				}
@@ -252,13 +252,13 @@ __kernel void lud(__global float* RESTRICT a, int size)
 
 		for (chunk_id_y = 0; chunk_id_y < chunk_size; chunk_id_y++)
 		{
-			block_offset_col = block_offset + ((chunk_id_y+1) << BLOCK_SIZE_LOG) * size;							// for leftmost block in the same block row
+			block_offset_col = block_offset + ((chunk_id_y+1) << BSIZE_LOG) * size;							// for leftmost block in the same block row
 
 			// loading leftmost block in the same block row into on-chip memory
-			for (i = 0; i < BLOCK_SIZE; i++)
+			for (i = 0; i < BSIZE; i++)
 			{
 				#pragma unroll
-				for (j = 0; j < BLOCK_SIZE; j++)
+				for (j = 0; j < BSIZE; j++)
 				{
 					mem_col[LA(i,j)] = a[GA(i,j,block_offset_col)];
 				}
@@ -266,32 +266,32 @@ __kernel void lud(__global float* RESTRICT a, int size)
 
 			for (chunk_id_x = 0; chunk_id_x < chunk_size; chunk_id_x++)
 			{
-				block_offset_row = block_offset + ((chunk_id_x+1) << BLOCK_SIZE_LOG);							// for topmost block in the same block column
-				block_offset_chunk = block_offset + ((chunk_id_y+1) << BLOCK_SIZE_LOG) * size + ((chunk_id_x+1) << BLOCK_SIZE_LOG);	// for current block
+				block_offset_row = block_offset + ((chunk_id_x+1) << BSIZE_LOG);							// for topmost block in the same block column
+				block_offset_chunk = block_offset + ((chunk_id_y+1) << BSIZE_LOG) * size + ((chunk_id_x+1) << BSIZE_LOG);	// for current block
 
 				// loading topmost block in the same block column and current block into on-chip memory
-				for (i = 0; i < BLOCK_SIZE; i++)
+				for (i = 0; i < BSIZE; i++)
 				{
 					#pragma unroll
-					for (j = 0; j < BLOCK_SIZE; j++)
+					for (j = 0; j < BSIZE; j++)
 					{
 						mem_row[LA(i,j)] = a[GA(i,j,block_offset_row)];
 					}
 					#pragma unroll
-					for (j = 0; j < BLOCK_SIZE; j++)
+					for (j = 0; j < BSIZE; j++)
 					{
 						mem_dia[LA(i,j)] = a[GA(i,j,block_offset_chunk)];
 					}
 				}
 
-				for (i = 0; i < BLOCK_SIZE; i++)
+				for (i = 0; i < BSIZE; i++)
 				{
 					#pragma unroll
-					for (j = 0; j < BLOCK_SIZE; j++)
+					for (j = 0; j < BSIZE; j++)
 					{
 						// since the following loop is fully unrolled, it doesn't need reduction
 						#pragma unroll
-						for (k = 0; k < BLOCK_SIZE; k++)
+						for (k = 0; k < BSIZE; k++)
 						{
 							mem_dia[LA(i,j)] = mem_dia[LA(i,j)] - mem_col[LA(i,k)]*mem_row[LA(k,j)];
 						}
@@ -299,10 +299,10 @@ __kernel void lud(__global float* RESTRICT a, int size)
 				}
 
 				// wrting current chunk back to global memory
-				for (i = 0; i < BLOCK_SIZE; i++)
+				for (i = 0; i < BSIZE; i++)
 				{
 					#pragma unroll
-					for (j = 0; j < BLOCK_SIZE; j++)
+					for (j = 0; j < BSIZE; j++)
 					{
 						a[GA(i,j,block_offset_chunk)] = mem_dia[LA(i,j)];
 					}

@@ -33,6 +33,9 @@
 #include "./../util/opencl/opencl.h"				// (in directory)
 #include "../../../common/timer.h"					// (in directory)
 #include "../../common/opencl_util.h"				// (in directory)
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+	#include "../../../common/power_fpga.h"
+#endif
 
 //======================================================================================================================================================150
 //	KERNEL_GPU_CUDA_WRAPPER FUNCTION HEADER
@@ -63,10 +66,14 @@ kernel_gpu_opencl_wrapper(	fp* image,					// input image
                                 int mem_size_i,
                                 int mem_size_j,
                                 int version,
-//                                double* kernelRunTime,				// For calculating kernel execution time
+//                                double* kernelRunTime,			// For calculating kernel execution time
                                 double* extractTime,				// For image compression kernel (before compute loop)
                                 double* computeTime,				// For the compute loop, similar to the CUDA version of the benchmark
-                                double* compressTime)				// For image compression kernel (after compute loop)
+                                double* compressTime				// For image compression kernel (after compute loop)
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+                             ,  double* power					// Power usage for supported boards
+#endif
+                         )
 {
 
 	//======================================================================================================================================================150
@@ -82,6 +89,11 @@ kernel_gpu_opencl_wrapper(	fp* image,					// input image
 
 	// common variables
 	cl_int error;
+
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+	// power measurement flag, only for Bittware's A10PL4 board
+	int flag = 0;
+#endif
 
 	//====================================================================================================100
 	//	GET PLATFORMS (Intel, AMD, NVIDIA, based on provided library), SELECT ONE
@@ -759,227 +771,245 @@ kernel_gpu_opencl_wrapper(	fp* image,					// input image
 		printf("Iterations Progress: ");
 	}
 
-	// execute main loop
-	GetTime(start[1]);
-	for (iter=0; iter<niter; iter++) // do for the number of iterations input parameter
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+	#pragma omp parallel num_threads(2) shared(flag)
 	{
-		// to avoid too much noise in the output, print iteration number once every 10 iterations, disabled for single-kernel versions
-		if (iter % 10 == 0 && version < 5)
+		if (omp_get_thread_num() == 0)
 		{
-			printf("%d ", iter);
-		}
-		fflush(NULL);
-
-		//====================================================================================================100
-		// Combined compute kernel for FPGA
-		//====================================================================================================100
-
-		if (!is_ndrange_kernel(version) && version > 3)
-		{
-			error = clEnqueueTask(command_queue, compute_kernel, 0, NULL, NULL);   
-			if (error != CL_SUCCESS) 
-				fatal_CL(error, __LINE__);
-
-			// swapping input and output image buffers
-			if (iter%2 == 0)
-			{
-				CL_SAFE_CALL( clSetKernelArg(compute_kernel, 3, sizeof(cl_mem),  (void *) &d_I_out) );
-				CL_SAFE_CALL( clSetKernelArg(compute_kernel, 5, sizeof(cl_mem),  (void *) &d_I)     );
-			}
-			else
-			{
-				CL_SAFE_CALL( clSetKernelArg(compute_kernel, 3, sizeof(cl_mem),  (void *) &d_I)     );
-				CL_SAFE_CALL( clSetKernelArg(compute_kernel, 5, sizeof(cl_mem),  (void *) &d_I_out) );
-			}
+			*power = GetPowerFPGA(&flag);
 		}
 		else
 		{
-			//====================================================================================================100
-			// Prepare kernel
-			//====================================================================================================100
+			#pragma omp barrier
+#endif
+			// start of timing point
+			GetTime(start[1]);
 
-			// launch kernel
-			if (is_ndrange_kernel(version)) {
-			error = clEnqueueNDRangeKernel(	command_queue, 
-											prepare_kernel, 
-											1, 
-											NULL, 
-											global_work_size, 
-											local_work_size, 
-											0, 
-											NULL, 
-											NULL);
-			} else {
-			error = clEnqueueTask(command_queue, prepare_kernel, 0, NULL, NULL);
-			}
-			
-			if (error != CL_SUCCESS) 
-				fatal_CL(error, __LINE__);
+			// execute main loop
+			for (iter=0; iter<niter; iter++) // do for the number of iterations input parameter
+			{
+				// to avoid too much noise in the output, print iteration number once every 10 iterations, disabled for single-kernel versions
+				if (iter % 10 == 0 && version < 5)
+				{
+					printf("%d ", iter);
+				}
+				fflush(NULL);
 
-			// synchronize
-			// error = clFinish(command_queue);
-			// if (error != CL_SUCCESS) 
-				// fatal_CL(error, __LINE__);
+				//====================================================================================================100
+				// Combined compute kernel for FPGA
+				//====================================================================================================100
 
-			//====================================================================================================100
-			//	Reduce Kernel - performs subsequent reductions of sums
-			//====================================================================================================100
+				if (!is_ndrange_kernel(version) && version > 3)
+				{
+					error = clEnqueueTask(command_queue, compute_kernel, 0, NULL, NULL);   
+					if (error != CL_SUCCESS) 
+						fatal_CL(error, __LINE__);
 
-			if (is_ndrange_kernel(version)) {
-			// initial values
-			blocks2_work_size = blocks_work_size;							// original number of blocks
-			global_work_size2[0] = global_work_size[0];
-			no = Ne;										// original number of sum elements
-			mul = 1;										// original multiplier
+					// swapping input and output image buffers
+					if (iter%2 == 0)
+					{
+						CL_SAFE_CALL( clSetKernelArg(compute_kernel, 3, sizeof(cl_mem),  (void *) &d_I_out) );
+						CL_SAFE_CALL( clSetKernelArg(compute_kernel, 5, sizeof(cl_mem),  (void *) &d_I)     );
+					}
+					else
+					{
+						CL_SAFE_CALL( clSetKernelArg(compute_kernel, 3, sizeof(cl_mem),  (void *) &d_I)     );
+						CL_SAFE_CALL( clSetKernelArg(compute_kernel, 5, sizeof(cl_mem),  (void *) &d_I_out) );
+					}
+				}
+				else
+				{
+					//====================================================================================================100
+					// Prepare kernel
+					//====================================================================================================100
 
-			// loop
-			while(blocks2_work_size != 0){
+					// launch kernel
+					if (is_ndrange_kernel(version)) {
+					error = clEnqueueNDRangeKernel(	command_queue, 
+													prepare_kernel, 
+													1, 
+													NULL, 
+													global_work_size, 
+													local_work_size, 
+													0, 
+													NULL, 
+													NULL);
+					} else {
+					error = clEnqueueTask(command_queue, prepare_kernel, 0, NULL, NULL);
+					}
+					
+					if (error != CL_SUCCESS) 
+						fatal_CL(error, __LINE__);
 
-			// set arguments that were uptaded in this loop
-			CL_SAFE_CALL( clSetKernelArg( reduce_kernel, 1, sizeof(cl_long), (void *) &no) );
-			CL_SAFE_CALL( clSetKernelArg( reduce_kernel, 2, sizeof(cl_int), (void *) &mul) );
-			CL_SAFE_CALL( clSetKernelArg( reduce_kernel, 5, sizeof(cl_int), (void *) &blocks2_work_size) );
+					// synchronize
+					// error = clFinish(command_queue);
+					// if (error != CL_SUCCESS) 
+						// fatal_CL(error, __LINE__);
 
-			// launch kernel
-			error = clEnqueueNDRangeKernel(	command_queue, 
-								reduce_kernel, 
-								1, 
-								NULL, 
-								global_work_size2, 
-								local_work_size, 
-								0, 
-								NULL, 
-								NULL);
-			if (error != CL_SUCCESS) 
-				fatal_CL(error, __LINE__);
+					//====================================================================================================100
+					//	Reduce Kernel - performs subsequent reductions of sums
+					//====================================================================================================100
 
-			// synchronize
-			// error = clFinish(command_queue);
-			// if (error != CL_SUCCESS) 
-			// fatal_CL(error, __LINE__);
+					if (is_ndrange_kernel(version)) {
+					// initial values
+					blocks2_work_size = blocks_work_size;							// original number of blocks
+					global_work_size2[0] = global_work_size[0];
+					no = Ne;										// original number of sum elements
+					mul = 1;										// original multiplier
 
-			// update execution parameters
-			no = blocks2_work_size;							// get current number of elements
-			if(blocks2_work_size == 1){
-			blocks2_work_size = 0;
-			}
-			else{
-			mul = mul * NUMBER_THREADS;						// update the increment
-			blocks_x = blocks2_work_size/(int)local_work_size[0];			// number of blocks
-			if (blocks2_work_size % (int)local_work_size[0] != 0){			// compensate for division remainder above by adding one grid
-				blocks_x = blocks_x + 1;
-			}
-			blocks2_work_size = blocks_x;
-			global_work_size2[0] = blocks2_work_size * (int)local_work_size[0];
-			}
-				
-			}
-			} else {
-			error = clEnqueueTask(command_queue, reduce_kernel, 0, NULL, NULL);
-			}
+					// loop
+					while(blocks2_work_size != 0){
 
-			// copy total sums to device
-			error = clEnqueueReadBuffer(command_queue,
-										d_sums,
-										CL_TRUE,
-										0,
-										mem_size_single,
-										&total,
-										0,
-										NULL,
+					// set arguments that were uptaded in this loop
+					CL_SAFE_CALL( clSetKernelArg( reduce_kernel, 1, sizeof(cl_long), (void *) &no) );
+					CL_SAFE_CALL( clSetKernelArg( reduce_kernel, 2, sizeof(cl_int), (void *) &mul) );
+					CL_SAFE_CALL( clSetKernelArg( reduce_kernel, 5, sizeof(cl_int), (void *) &blocks2_work_size) );
+
+					// launch kernel
+					error = clEnqueueNDRangeKernel(	command_queue, 
+										reduce_kernel, 
+										1, 
+										NULL, 
+										global_work_size2, 
+										local_work_size, 
+										0, 
+										NULL, 
 										NULL);
-			if (error != CL_SUCCESS) 
-				fatal_CL(error, __LINE__);
+					if (error != CL_SUCCESS) 
+						fatal_CL(error, __LINE__);
 
-			error = clEnqueueReadBuffer(command_queue,
-										d_sums2,
-										CL_TRUE,
-										0,
-										mem_size_single,
-										&total2,
-										0,
-										NULL,
+					// synchronize
+					// error = clFinish(command_queue);
+					// if (error != CL_SUCCESS) 
+					// fatal_CL(error, __LINE__);
+
+					// update execution parameters
+					no = blocks2_work_size;							// get current number of elements
+					if(blocks2_work_size == 1){
+					blocks2_work_size = 0;
+					}
+					else{
+					mul = mul * NUMBER_THREADS;						// update the increment
+					blocks_x = blocks2_work_size/(int)local_work_size[0];			// number of blocks
+					if (blocks2_work_size % (int)local_work_size[0] != 0){			// compensate for division remainder above by adding one grid
+						blocks_x = blocks_x + 1;
+					}
+					blocks2_work_size = blocks_x;
+					global_work_size2[0] = blocks2_work_size * (int)local_work_size[0];
+					}
+						
+					}
+					} else {
+					error = clEnqueueTask(command_queue, reduce_kernel, 0, NULL, NULL);
+					}
+
+					// copy total sums to device
+					error = clEnqueueReadBuffer(command_queue,
+												d_sums,
+												CL_TRUE,
+												0,
+												mem_size_single,
+												&total,
+												0,
+												NULL,
+												NULL);
+					if (error != CL_SUCCESS) 
+						fatal_CL(error, __LINE__);
+
+					error = clEnqueueReadBuffer(command_queue,
+												d_sums2,
+												CL_TRUE,
+												0,
+												mem_size_single,
+												&total2,
+												0,
+												NULL,
+												NULL);
+					if (error != CL_SUCCESS) 
+						fatal_CL(error, __LINE__);
+
+					//====================================================================================================100
+					// calculate statistics
+					//====================================================================================================100
+					
+					meanROI  = total / (fp)(NeROI);										// gets mean (average) value of element in ROI
+					meanROI2 = meanROI * meanROI;										//
+					varROI   = (total2 / (fp)(NeROI)) - meanROI2;								// gets variance of ROI
+					q0sqr    = varROI / meanROI2;										// gets standard deviation of ROI
+
+					//====================================================================================================100
+					// execute srad kernel
+					//====================================================================================================100
+
+					// set arguments that were uptaded in this loop
+					CL_SAFE_CALL( clSetKernelArg( srad_kernel, srad_kernel_arg_idx - 3, sizeof(fp), (void *) &q0sqr) );
+
+					// launch kernel
+					if (is_ndrange_kernel(version)) {
+					error = clEnqueueNDRangeKernel(	command_queue, 
+										srad_kernel, 
+										1, 
+										NULL, 
+										global_work_size, 
+										local_work_size, 
+										0, 
+										NULL, 
 										NULL);
-			if (error != CL_SUCCESS) 
-				fatal_CL(error, __LINE__);
+					} else {
+					error = clEnqueueTask(command_queue, srad_kernel, 0, NULL, NULL);
+					}
+					
+					if (error != CL_SUCCESS) 
+						fatal_CL(error, __LINE__);
 
-			//====================================================================================================100
-			// calculate statistics
-			//====================================================================================================100
-			
-			meanROI  = total / (fp)(NeROI);										// gets mean (average) value of element in ROI
-			meanROI2 = meanROI * meanROI;										//
-			varROI   = (total2 / (fp)(NeROI)) - meanROI2;								// gets variance of ROI
-			q0sqr    = varROI / meanROI2;										// gets standard deviation of ROI
+					// synchronize
+					// error = clFinish(command_queue);
+					// if (error != CL_SUCCESS) 
+						// fatal_CL(error, __LINE__);
 
-			//====================================================================================================100
-			// execute srad kernel
-			//====================================================================================================100
+					//====================================================================================================100
+					// execute srad2 kernel
+					//====================================================================================================100
 
-			// set arguments that were uptaded in this loop
-			CL_SAFE_CALL( clSetKernelArg( srad_kernel, srad_kernel_arg_idx - 3, sizeof(fp), (void *) &q0sqr) );
+					// launch kernel
+					if (is_ndrange_kernel(version)) {
+					error = clEnqueueNDRangeKernel(	command_queue, 
+										srad2_kernel, 
+										1, 
+										NULL, 
+										global_work_size, 
+										local_work_size, 
+										0, 
+										NULL, 
+										NULL);
+					} else {
+					error = clEnqueueTask(command_queue, srad2_kernel, 0, NULL, NULL);
+					}
+					
+					if (error != CL_SUCCESS) 
+						fatal_CL(error, __LINE__);
 
-			// launch kernel
-			if (is_ndrange_kernel(version)) {
-			error = clEnqueueNDRangeKernel(	command_queue, 
-								srad_kernel, 
-								1, 
-								NULL, 
-								global_work_size, 
-								local_work_size, 
-								0, 
-								NULL, 
-								NULL);
-			} else {
-			error = clEnqueueTask(command_queue, srad_kernel, 0, NULL, NULL);
+					//====================================================================================================100
+					// End
+					//====================================================================================================100
+				}
 			}
-			
-			if (error != CL_SUCCESS) 
-				fatal_CL(error, __LINE__);
 
+			//====================================================================================================100
 			// synchronize
-			// error = clFinish(command_queue);
-			// if (error != CL_SUCCESS) 
-				// fatal_CL(error, __LINE__);
-
-			//====================================================================================================100
-			// execute srad2 kernel
 			//====================================================================================================100
 
-			// launch kernel
-			if (is_ndrange_kernel(version)) {
-			error = clEnqueueNDRangeKernel(	command_queue, 
-								srad2_kernel, 
-								1, 
-								NULL, 
-								global_work_size, 
-								local_work_size, 
-								0, 
-								NULL, 
-								NULL);
-			} else {
-			error = clEnqueueTask(command_queue, srad2_kernel, 0, NULL, NULL);
-			}
-			
+			error = clFinish(command_queue);
 			if (error != CL_SUCCESS) 
 				fatal_CL(error, __LINE__);
-
-			//====================================================================================================100
-			// End
-			//====================================================================================================100
+			GetTime(end[1]);
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+			flag = 1;
 		}
 	}
+#endif
 
-	//====================================================================================================100
-	// synchronize
-	//====================================================================================================100
-
-	error = clFinish(command_queue);
-	if (error != CL_SUCCESS) 
-		fatal_CL(error, __LINE__);
-	GetTime(end[1]);
-
-	if (version < 5) //disable iteration progress for single-kernel versions
+	if (version < 5) // disable iteration progress for single-kernel versions
 	{
 		printf("\n==============================================================\n\n");
 	}

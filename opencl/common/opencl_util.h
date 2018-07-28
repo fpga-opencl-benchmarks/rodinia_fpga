@@ -546,10 +546,10 @@ inline static void* alignedMalloc(size_t size)
 #endif	
 }
 
-inline static void* alignedCalloc(size_t size)
+inline static void* alignedCalloc(size_t num, size_t size)
 {
 #ifdef _WIN32
-	void *ptr = _aligned_malloc(size, AOCL_ALIGNMENT);
+	void *ptr = _aligned_malloc(num * size, AOCL_ALIGNMENT);
 	if (ptr == NULL)
 	{
 		fprintf(stderr, "Aligned Calloc failed due to insufficient memory.\n");
@@ -559,7 +559,7 @@ inline static void* alignedCalloc(size_t size)
 	return ptr;
 #else
 	void *ptr = NULL;
-	if ( posix_memalign (&ptr, AOCL_ALIGNMENT, size) )
+	if ( posix_memalign (&ptr, AOCL_ALIGNMENT, num * size) )
 	{
 		fprintf(stderr, "Aligned Calloc failed due to insufficient memory.\n");
 		exit(-1);

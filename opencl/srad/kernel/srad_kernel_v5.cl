@@ -2,17 +2,27 @@
 //	DEFINE / INCLUDE
 //========================================================================================================================================================================================================200
 
-#define REDUCTION_UNROLL 16
 #define FADLATENCY 8
 #define REDUCE_LATENCY (REDUCTION_UNROLL/2)*FADLATENCY
+#define REDUCTION_UNROLL 16
+
 #ifndef BSIZE
-	#if defined(AOCL_BOARde5net_a7)
+	#ifdef AOCL_BOARD_de5net_a7
+		#define BSIZE 128
+	#elif  AOCL_BOARD_a10pl4_dd4gb_gx115es3
+		#define BSIZE 256
+	#else
 		#define BSIZE 128
 	#endif
 #endif
+
 #ifndef SSIZE
-	#if defined(AOCL_BOARde5net_a7)
+	#ifdef AOCL_BOARD_de5net_a7
 		#define SSIZE 4
+	#elif  AOCL_BOARD_a10pl4_dd4gb_gx115es3
+		#define SSIZE 8
+	#else
+		#define SSIZE 2
 	#endif
 #endif
 
@@ -65,7 +75,9 @@ __kernel void compute_kernel(fp            lambda,
            __global          fp*  RESTRICT I_out)
 {
 	fp sums = 0, sums2 = 0;									// reduction kernel variables
-	fp shift_reg1[REDUCE_LATENCY + 1], shift_reg2[REDUCE_LATENCY + 1];			// shift register to optimize reduction for FPGA
+#ifndef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+	fp shift_reg1[REDUCE_LATENCY + 1], shift_reg2[REDUCE_LATENCY + 1];			// shift register to optimize reduction for Startx V, not used on Arria 10
+#endif
 	fp c_loc_SR[C_LOC_SR_SIZE];								// shift register for c_loc to resolve right and bottom dependency locally
 	fp I_SR[I_SR_SIZE];									// shift register for storing values of I to reduce global memory access
 
@@ -74,19 +86,23 @@ __kernel void compute_kernel(fp            lambda,
 	//======================================================================================================================================================150
 	//	Reduction
 	//======================================================================================================================================================150
+
+#ifdef AOCL_BOARD_de5net_a7
+
+	// uses shift register optimization for Stratix V
 	#pragma unroll
 	for (int i = 0; i < REDUCE_LATENCY + 1; i++)
 	{
 		shift_reg1[i] = 0;
 		shift_reg2[i] = 0;
 	}
-  
+
 	#pragma unroll REDUCTION_UNROLL
 	for (long i = 0; i < Ne; ++i)
 	{
 		shift_reg1[REDUCE_LATENCY] = shift_reg1[0] + I[i];
 		shift_reg2[REDUCE_LATENCY] = shift_reg2[0] + I[i] * I[i];
-		
+
 		#pragma unroll
 		for (int j = 0; j < REDUCE_LATENCY; j++)
 		{
@@ -94,13 +110,35 @@ __kernel void compute_kernel(fp            lambda,
 			shift_reg2[j] = shift_reg2[j + 1];
 		}
 	}
-  
+
 	#pragma unroll
 	for (int j = 0; j < REDUCE_LATENCY; j++)
 	{
 		sums  += shift_reg1[j];
 		sums2 += shift_reg2[j];
 	}
+
+#else   //AOCL_BOARD_a10pl4_dd4gb_gx115es3
+
+	//uses single-cycle accumulation for Arria 10
+	int reduction_chunk_count = (Ne % REDUCTION_UNROLL == 0) ? Ne / REDUCTION_UNROLL : (Ne / REDUCTION_UNROLL) + 1;
+
+	for (int i = 0; i < reduction_chunk_count; i++)
+	{
+		fp sums_temp = 0, sums_temp2 = 0;
+
+		#pragma unroll
+		for (int j = 0; j < REDUCTION_UNROLL; j++)
+		{
+			long Ne_reduce = i * REDUCTION_UNROLL + j;
+			sums_temp  += (Ne_reduce < Ne) ? I[Ne_reduce] : 0;
+			sums_temp2 += (Ne_reduce < Ne) ? I[Ne_reduce]*I[Ne_reduce] : 0;
+		}
+
+		sums  += sums_temp;
+		sums2 += sums_temp2;
+	}
+#endif
 
 	fp mean   = sums / Ne;									// mean (average) value of element
 	fp var    = (sums2 / Ne) - mean * mean;							// variance

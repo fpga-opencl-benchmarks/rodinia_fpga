@@ -29,9 +29,9 @@ Parameter `<row-lenght>` specifies the length of each row, `<column-length>` the
 ## v1
 
 Single work-item version based on OpenMP version of the benchmark
-with strict. Also moved for loop on rows from host code to device
-code and added clEnqueueWriteBuffer to actually write the buffers
-from host to device instead of using host pointers.
+with strict. Similar to the NDRange kernels, the loop on rows is
+kept in the host code and the source and destinations buffers are
+swapped row by row.
 
 ## v2
 
@@ -40,7 +40,7 @@ between compute units performed by aoc
 
 ## v3
 
-v1 with some loop unrolling.
+v1 with some loop unrolling and __attribute__((max_global_work_dim(0))).
 
 ## v4
 

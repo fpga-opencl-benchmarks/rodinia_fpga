@@ -24,6 +24,10 @@
 
 #define KERNEL_PREFIX "./euler3d_kernel"
 
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+	#include "../../common/power_fpga.h"
+#endif
+
 static bool compute_flux_arg_set = false;
 
 void compute_flux(int nelr, cl_mem elements_surrounding_elements, cl_mem normals, cl_mem variables, cl_mem ff_variable, \
@@ -110,6 +114,16 @@ int main(int argc, char** argv){
   char *vs;
   init_fpga2(&argc, &argv, &vs, &version_number);
   version_string = std::string(vs);
+  
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+  // power measurement parameters, only for Bittware's A10PL4 board
+  int flag = 0;
+  double power = 0;
+  double energy = 0;
+#endif
+  
+  // timing variables
+  TimeStamp start, end;
 
   if (argc < 4){
     std::cout << "specify data file name, iterations, and block size\n";
@@ -274,44 +288,58 @@ int main(int argc, char** argv){
   // these need to be computed the first time in order to compute time step
   std::cout << "Starting..." << std::endl;
 
-  TimeStamp start, end;
-  GetTime(start);
-  
-  // Begin iterations
-  for(int i = 0; i < iterations; i++){
-    if (is_ndrange_kernel(version_number)) {
-      copy<float>(old_variables, variables, nelr*NVAR);
-      compute_step_factor(nelr, variables, areas, step_factors);
-    } else {
-      copy<float>(old_variables_soa, variables_soa, nelr);
-      compute_step_factor(nelr, variables_soa, areas, step_factors);
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+  #pragma omp parallel num_threads(2) shared(flag)
+  {
+    if (omp_get_thread_num() == 0)
+    {
+      power = GetPowerFPGA(&flag);
     }
-    for(int j = 0; j < RK; j++) {
-      if (is_ndrange_kernel(version_number)) {
-        compute_flux(nelr, elements_surrounding_elements, normals,
-                     variables, ff_variable, fluxes,
-                     ff_flux_contribution_density_energy,
-                     ff_flux_contribution_momentum_x,
-                     ff_flux_contribution_momentum_y,
-                     ff_flux_contribution_momentum_z);
-        time_step(j, nelr, old_variables, variables, step_factors, fluxes);
-      } else {
-        compute_flux(nelr, elements_surrounding_elements, normals,
-                     variables_soa, ff_variable, fluxes_soa,
-                     ff_flux_contribution_density_energy,
-                     ff_flux_contribution_momentum_x,
-                     ff_flux_contribution_momentum_y,
-                     ff_flux_contribution_momentum_z);
-        time_step(j, nelr, old_variables_soa, variables_soa, step_factors, fluxes_soa);
-      }        
-    } 
-  }
+    else
+    {
+      #pragma omp barrier
+#endif
+      // beginning of timing point
+      GetTime(start);
   
+      // Begin iterations
+      for(int i = 0; i < iterations; i++){
+        if (is_ndrange_kernel(version_number)) {
+          copy<float>(old_variables, variables, nelr*NVAR);
+          compute_step_factor(nelr, variables, areas, step_factors);
+        } else {
+          copy<float>(old_variables_soa, variables_soa, nelr);
+          compute_step_factor(nelr, variables_soa, areas, step_factors);
+        }
+        for(int j = 0; j < RK; j++) {
+          if (is_ndrange_kernel(version_number)) {
+            compute_flux(nelr, elements_surrounding_elements, normals,
+                         variables, ff_variable, fluxes,
+                         ff_flux_contribution_density_energy,
+                         ff_flux_contribution_momentum_x,
+                         ff_flux_contribution_momentum_y,
+                         ff_flux_contribution_momentum_z);
+            time_step(j, nelr, old_variables, variables, step_factors, fluxes);
+          } else {
+            compute_flux(nelr, elements_surrounding_elements, normals,
+                         variables_soa, ff_variable, fluxes_soa,
+                         ff_flux_contribution_density_energy,
+                         ff_flux_contribution_momentum_x,
+                         ff_flux_contribution_momentum_y,
+                         ff_flux_contribution_momentum_z);
+            time_step(j, nelr, old_variables_soa, variables_soa, step_factors, fluxes_soa);
+          }        
+        } 
+      }
 
-  _clFinish();
-  GetTime(end);
-  
-  printf("Computation done in %0.3lf ms.\n", TimeDiff(start, end));
+      _clFinish();
+      GetTime(end);
+
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+      flag = 1;
+    }
+  }
+#endif
 
   std::cout << "Saving solution..." << std::endl;
   if (is_ndrange_kernel(version_number)) {
@@ -322,6 +350,22 @@ int main(int argc, char** argv){
   std::cout << "Saved solution..." << std::endl;
   _clStatistics();
   std::cout << "Cleaning up..." << std::endl;
+  
+  double computeTime = TimeDiff(start, end);
+  printf("Computation done in %0.3lf ms.\n", computeTime);
+
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+  energy = GetEnergyFPGA(power, computeTime);
+  if (power != -1) // -1 --> sensor read failure
+  {
+    printf("Total energy used is %0.3lf jouls.\n", energy);
+    printf("Average power consumption is %0.3lf watts.\n", power);
+  }
+  else
+  {
+    printf("Failed to read power values from the sensor!\n");
+  }
+#endif
 
   //--release resources
 #if 0  

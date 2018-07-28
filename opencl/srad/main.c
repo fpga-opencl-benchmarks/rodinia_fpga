@@ -33,6 +33,9 @@
 //#include "./util/timer/timer.h"							// (in specified path)
 #include "../../common/timer.h"
 #include "../common/opencl_util.h"
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+	#include "../../common/power_fpga.h"
+#endif
 //======================================================================================================================================================150
 //	KERNEL
 //======================================================================================================================================================150
@@ -67,13 +70,19 @@ int main(int argc, char* argv [])
 	TimeStamp time5;
 	TimeStamp time6;
 
-	// inputs image, input paramenters
-	fp* image_ori;													// originalinput image
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+	// power parameters for Bittware A10PL4
+	double power = 0;
+	double energy = 0;
+#endif
+
+	// inputs image, input parameters
+	fp* image_ori;													// original input image
 	int image_ori_rows;
 	int image_ori_cols;
 	cl_long image_ori_elem;
 
-	// inputs image, input paramenters
+	// inputs image, input parameters
 	fp* image;													// input image
 	int Nr,Nc;													// IMAGE nbr of rows/cols/elements
 	cl_long Ne;
@@ -86,7 +95,7 @@ int main(int argc, char* argv [])
 	int r1,r2,c1,c2;												// row/col coordinates of uniform ROI
 	cl_long NeROI;													// ROI nbr of elements
 
-	// surrounding pixel indicies
+	// surrounding pixel indices
 	int* iN = NULL;
 	int* iS = NULL;
 	int* jE = NULL;
@@ -166,41 +175,41 @@ int main(int argc, char* argv [])
 	//======================================================================================================================================================150
 
 	// variables
-	r1     = 0;										// top row index of ROI
-	r2     = Nr - 1;									// bottom row index of ROI
-	c1     = 0;										// left column index of ROI
-	c2     = Nc - 1;									// right column index of ROI
+	r1     = 0;											// top row index of ROI
+	r2     = Nr - 1;										// bottom row index of ROI
+	c1     = 0;											// left column index of ROI
+	c2     = Nc - 1;										// right column index of ROI
 
 	// ROI image size
-	NeROI = (r2-r1+1)*(c2-c1+1);											// number of elements in ROI, ROI size
+	NeROI = (r2-r1+1)*(c2-c1+1);									// number of elements in ROI, ROI size
 
 	// allocate variables for surrounding pixels
 	mem_size_i = sizeof(int) * Nr;
 	mem_size_j = sizeof(int) * Nc;
 	if (is_ndrange_kernel(version) || version < 5)
 	{
-		iN = (int *)alignedMalloc(mem_size_i) ;										// north surrounding element
-		iS = (int *)alignedMalloc(mem_size_i) ;										// south surrounding element
-		jW = (int *)alignedMalloc(mem_size_j) ;										// west surrounding element
-		jE = (int *)alignedMalloc(mem_size_j) ;										// east surrounding element
+		iN = (int *)alignedMalloc(mem_size_i) ;							// north surrounding element
+		iS = (int *)alignedMalloc(mem_size_i) ;							// south surrounding element
+		jW = (int *)alignedMalloc(mem_size_j) ;							// west surrounding element
+		jE = (int *)alignedMalloc(mem_size_j) ;							// east surrounding element
 
 		// N/S/W/E indices of surrounding pixels (every element of IMAGE)
 		for (i=0; i<Nr; i++)
 		{
-			iN[i] = i-1;														// holds index of IMAGE row above
-			iS[i] = i+1;														// holds index of IMAGE row below
+			iN[i] = i-1;									// holds index of IMAGE row above
+			iS[i] = i+1;									// holds index of IMAGE row below
 		}
 		for (j=0; j<Nc; j++)
 		{
-			jW[j] = j-1;														// holds index of IMAGE column on the left
-			jE[j] = j+1;														// holds index of IMAGE column on the right
+			jW[j] = j-1;									// holds index of IMAGE column on the left
+			jE[j] = j+1;									// holds index of IMAGE column on the right
 		}
 
 		// N/S/W/E boundary conditions, fix surrounding indices outside boundary of image
-		iN[0]    = 0;															// changes IMAGE top row index from -1 to 0
-		iS[Nr-1] = Nr-1;														// changes IMAGE bottom row index from Nr to Nr-1 
-		jW[0]    = 0;															// changes IMAGE leftmost column index from -1 to 0
-		jE[Nc-1] = Nc-1;														// changes IMAGE rightmost column index from Nc to Nc-1
+		iN[0]    = 0;										// changes IMAGE top row index from -1 to 0
+		iS[Nr-1] = Nr-1;									// changes IMAGE bottom row index from Nr to Nr-1
+		jW[0]    = 0;										// changes IMAGE leftmost column index from -1 to 0
+		jE[Nc-1] = Nc-1;									// changes IMAGE rightmost column index from Nc to Nc-1
 	}
 
 	GetTime(time3);
@@ -208,13 +217,13 @@ int main(int argc, char* argv [])
 	// 	KERNEL
 	//======================================================================================================================================================150
 
-	kernel_gpu_opencl_wrapper(	image,											// input image
-                                        Nr,											// IMAGE nbr of rows
-                                        Nc,											// IMAGE nbr of cols
-                                        Ne,											// IMAGE nbr of elem
-                                        niter,											// nbr of iterations
-                                        lambda,											// update step size
-                                        NeROI,											// ROI nbr of elements
+	kernel_gpu_opencl_wrapper(	image,								// input image
+                                        Nr,								// IMAGE nbr of rows
+                                        Nc,								// IMAGE nbr of cols
+                                        Ne,								// IMAGE nbr of elem
+                                        niter,								// nbr of iterations
+                                        lambda,								// update step size
+                                        NeROI,								// ROI nbr of elements
                                         iN,
                                         iS,
                                         jE,
@@ -222,10 +231,14 @@ int main(int argc, char* argv [])
                                         mem_size_i,
                                         mem_size_j,
                                         version,
-//                                        &kernelRunTime,										// Kernel execution time
-                                        &extractTime,										// Image extraction time
-                                        &computeTime,										// Compute loop time
-                                        &compressTime);										// Image compression time
+//                                        &kernelRunTime,						// Kernel execution time
+                                        &extractTime,							// Image extraction time
+                                        &computeTime,							// Compute loop time
+                                        &compressTime							// Image compression time
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+                                     ,  &power								// Power usage for supported boards
+#endif
+	                         );
 	GetTime(time4);
 
 	//======================================================================================================================================================150
@@ -281,6 +294,14 @@ int main(int argc, char* argv [])
                TimeDiff(time5, time6) / 1000.0, TimeDiff(time5, time6) / total_ms * 100);
 
 	printf("\nComputation done in %0.3lf ms.\n", computeTime);
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+	energy = GetEnergyFPGA(power, computeTime);
+	if (power != -1) // -1 --> failed to read energy values
+	{
+		printf("Total energy used is %0.3lf jouls.\n", energy);
+		printf("Average power consumption is %0.3lf watts.\n", power);
+	}
+#endif
 	printf("Total time: %.3lf ms\n", total_ms);
 	// The below value reflects only pure kernel execution time for all kernels in total
 //	printf("Total kernel execution time (including extract and compress kernels): %.9f s\n", kernelRunTime / 1000.0);

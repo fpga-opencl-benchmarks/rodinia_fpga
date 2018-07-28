@@ -1,1 +1,2 @@
-./lavaMD -boxes1d 10
+version=$1
+./lavaMD -boxes1d 10 $version

@@ -25,6 +25,9 @@ extern "C" {
 
 #include "./../util/opencl/opencl.h"				// (in library path specified to compiler)	needed by for device functions
 #include "./../util/timer/timer.h"					// (in library path specified to compiler)	needed by timer
+#include "./../util/opencl/opencl.h"				// (in directory)
+#include "../../../common/timer.h"					// (in directory)
+#include "../../common/opencl_util.h"				// (in directory)
 
 //======================================================================================================================================================150
 //	KERNEL_GPU_OPENCL_WRAPPER FUNCTION HEADER
@@ -42,7 +45,8 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 							box_str* box_cpu,
 							FOUR_VECTOR* rv_cpu,
 							fp* qv_cpu,
-							FOUR_VECTOR* fv_cpu)
+							FOUR_VECTOR* fv_cpu,
+							int version)
 {
 
 	//======================================================================================================================================================150
@@ -57,6 +61,8 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 	long long time4;
 	long long time5;
 	long long time6;
+
+	TimeStamp start, end;
 
 	time0 = get_time();
 
@@ -77,6 +83,8 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 
 	// Get the number of available platforms
 	cl_uint num_platforms;
+	char pbuf[100];
+#if 0
 	error = clGetPlatformIDs(	0, 
 								NULL, 
 								&num_platforms);
@@ -95,7 +103,6 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 	cl_platform_id platform = platforms[0];
 
 	// Get the name of the selected platform and print it (if there are multiple platforms, choose the first one)
-	char pbuf[100];
 	error = clGetPlatformInfo(	platform, 
 								CL_PLATFORM_VENDOR, 
 								sizeof(pbuf), 
@@ -104,20 +111,28 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 	if (error != CL_SUCCESS) 
 		fatal_CL(error, __LINE__);
 	printf("Platform: %s\n", pbuf);
+#else
+        cl_platform_id *platform = NULL;
+        cl_context_properties context_properties[3];
+        cl_device_type device_type;
+        display_device_info(&platform, &num_platforms);
+        select_device_type(platform, &num_platforms, &device_type);
+        validate_selection(platform, &num_platforms, context_properties, &device_type);
+#endif
 
 	//====================================================================================================100
 	//	CREATE CONTEXT FOR THE PLATFORM
 	//====================================================================================================100
 
-	// Create context properties for selected platform
+	/*// Create context properties for selected platform
 	cl_context_properties context_properties[3] = {	CL_CONTEXT_PLATFORM, 
 													(cl_context_properties) platform, 
-													0};
+													0};*/
 
 	// Create context for selected platform being GPU
 	cl_context context;
 	context = clCreateContextFromType(	context_properties, 
-										CL_DEVICE_TYPE_GPU, 
+										device_type, 
 										NULL, 
 										NULL, 
 										&error);
@@ -180,18 +195,33 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 	//====================================================================================================100
 
 	// Load kernel source code from file
-	const char *source = load_kernel_source("./kernel/kernel_gpu_opencl.cl");
-	size_t sourceSize = strlen(source);
+	size_t sourceSize = 0;
+	char *kernel_file_path = getVersionedKernelName("./kernel/lavaMD_kernel", version);
+	char *source = read_kernel(kernel_file_path, &sourceSize);
+	free(kernel_file_path);
 
+#if defined(USE_JIT)
 	// Create the program
 	cl_program program = clCreateProgramWithSource(	context, 
-													1, 
-													&source, 
-													&sourceSize, 
-													&error);
+											1, 
+											(const char **)&source, 
+											&sourceSize, 
+											&error);
+#else
+	cl_program program = clCreateProgramWithBinary(	context,
+                                                        1,
+                                                        devices,
+                                                        &sourceSize,
+                                                        (const unsigned char**)&source,
+                                                        NULL,
+                                                        &error);
+#endif
 	if (error != CL_SUCCESS) 
 		fatal_CL(error, __LINE__);
 
+	free(source);
+
+#if defined(USE_JIT)
 	// parameterized kernel dimension
 	char clOptions[110];
 	//  sprintf(clOptions,"-I../../src");                                                                                 
@@ -206,15 +236,10 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 	sprintf(clOptions + strlen(clOptions), " -DRD_WG_SIZE_0_0=%d", RD_WG_SIZE_0_0);
 #endif
 
-
 	// Compile the program
-	error = clBuildProgram(	program, 
-							1, 
-							&device, 
-							clOptions, 
-							NULL, 
-							NULL);
-	// Print warnings and errors from compilation
+	clBuildProgram_SAFE(program, 1, &device, clOptions, NULL, NULL);
+
+	/*// Print warnings and errors from compilation
 	static char log[65536]; 
 	memset(log, 0, sizeof(log));
 	clGetProgramBuildInfo(	program, 
@@ -226,7 +251,8 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 	if (strstr(log,"warning:") || strstr(log, "error:")) 
 		printf("<<<<\n%s\n>>>>\n", log);
 	if (error != CL_SUCCESS) 
-		fatal_CL(error, __LINE__);
+		fatal_CL(error, __LINE__);*/
+#endif
 
 	// Create kernel
 	cl_kernel kernel;
@@ -237,12 +263,6 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 		fatal_CL(error, __LINE__);
 
 	//====================================================================================================100
-	//	INITIAL DRIVER OVERHEAD
-	//====================================================================================================100
-
-	// cudaThreadSynchronize();
-
-	//====================================================================================================100
 	//	EXECUTION PARAMETERS
 	//====================================================================================================100
 
@@ -251,7 +271,7 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 	size_t global_work_size[1];
 	global_work_size[0] = dim_cpu.number_boxes * local_work_size[0];
 
-	printf("# of blocks = %d, # of threads/block = %d (ensure that device can handle)\n", global_work_size[0]/local_work_size[0], local_work_size[0]);
+	printf("# of blocks = %zd, # of threads/block = %zd (ensure that device can handle)\n", global_work_size[0]/local_work_size[0], local_work_size[0]);
 
 	time1 = get_time();
 
@@ -262,6 +282,32 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 	//====================================================================================================100
 	//	GPU MEMORY				COPY IN
 	//====================================================================================================100
+
+	//==================================================50
+	//	par
+	//==================================================50
+
+	cl_mem d_par_gpu;
+	d_par_gpu = clCreateBuffer(	context, 
+								CL_MEM_READ_WRITE, 
+								sizeof(par_cpu), 
+								NULL, 
+								&error );
+	if (error != CL_SUCCESS) 
+		fatal_CL(error, __LINE__);
+
+	//==================================================50
+	//	dim
+	//==================================================50
+
+	cl_mem d_dim_gpu;
+	d_dim_gpu = clCreateBuffer(	context, 
+								CL_MEM_READ_WRITE, 
+								sizeof(dim_cpu), 
+								NULL, 
+								&error );
+	if (error != CL_SUCCESS) 
+		fatal_CL(error, __LINE__);
 
 	//==================================================50
 	//	boxes
@@ -328,6 +374,38 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 	//====================================================================================================100
 	//	GPU MEMORY				COPY IN
 	//====================================================================================================100
+
+	//==================================================50
+	//	par
+	//==================================================50
+
+	error = clEnqueueWriteBuffer(	command_queue,			// command queue
+									d_par_gpu,				// destination
+									1,						// block the source from access until this copy operation complates (1=yes, 0=no)
+									0,						// offset in destination to write to
+									sizeof(par_cpu),		// size to be copied
+									&par_cpu,				// source
+									0,						// # of events in the list of events to wait for
+									NULL,					// list of events to wait for
+									NULL);					// ID of this operation to be used by waiting operations
+	if (error != CL_SUCCESS) 
+		fatal_CL(error, __LINE__);
+
+	//==================================================50
+	//	dim
+	//==================================================50
+
+	error = clEnqueueWriteBuffer(	command_queue,			// command queue
+									d_dim_gpu,				// destination
+									1,						// block the source from access until this copy operation complates (1=yes, 0=no)
+									0,						// offset in destination to write to
+									sizeof(dim_cpu),		// size to be copied
+									&dim_cpu,				// source
+									0,						// # of events in the list of events to wait for
+									NULL,					// list of events to wait for
+									NULL);					// ID of this operation to be used by waiting operations
+	if (error != CL_SUCCESS) 
+		fatal_CL(error, __LINE__);
 
 	//==================================================50
 	//	boxes
@@ -403,49 +481,50 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 	//	KERNEL
 	//======================================================================================================================================================150
 
-	// ???
-	clSetKernelArg(	kernel, 
+	// kernel arguments
+	CL_SAFE_CALL(clSetKernelArg(	kernel, 
 					0, 
-					sizeof(par_str), 
-					(void *) &par_cpu);
-	clSetKernelArg(	kernel, 
+					sizeof(float), 
+					(void *) &par_cpu.alpha));
+	CL_SAFE_CALL(clSetKernelArg(	kernel, 
 					1, 
-					sizeof(dim_str), 
-					(void *) &dim_cpu);
-	clSetKernelArg(	kernel, 
+					sizeof(long), 
+					(void *) &dim_cpu.number_boxes));
+	CL_SAFE_CALL(clSetKernelArg(	kernel, 
 					2, 
 					sizeof(cl_mem), 
-					(void *) &d_box_gpu);
-	clSetKernelArg(	kernel, 
+					(void *) &d_box_gpu));
+	CL_SAFE_CALL(clSetKernelArg(	kernel, 
 					3, 
 					sizeof(cl_mem), 
-					(void *) &d_rv_gpu);
-	clSetKernelArg(	kernel, 
+					(void *) &d_rv_gpu));
+	CL_SAFE_CALL(clSetKernelArg(	kernel, 
 					4, 
 					sizeof(cl_mem), 
-					(void *) &d_qv_gpu);
-	clSetKernelArg(	kernel, 
+					(void *) &d_qv_gpu));
+	CL_SAFE_CALL(clSetKernelArg(	kernel, 
 					5, 
 					sizeof(cl_mem), 
-					(void *) &d_fv_gpu);
+					(void *) &d_fv_gpu));
 
+	GetTime(start);
 	// launch kernel - all boxes
-	error = clEnqueueNDRangeKernel(	command_queue, 
-									kernel, 
-									1, 
-									NULL, 
-									global_work_size, 
-									local_work_size, 
-									0, 
-									NULL, 
-									NULL);
+	if (is_ndrange_kernel(version))
+	{
+		error = clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, global_work_size, local_work_size, 0, NULL, NULL);
+	}
+	else
+	{
+		error = clEnqueueTask(command_queue, kernel, 0, NULL, NULL);
+	}
 	if (error != CL_SUCCESS) 
 		fatal_CL(error, __LINE__);
 
-	// Wait for all operations to finish NOT SURE WHERE THIS SHOULD GO
+	// Wait for all operations to finish
 	error = clFinish(command_queue);
 	if (error != CL_SUCCESS) 
 		fatal_CL(error, __LINE__);
+	GetTime(end);
 
 	time4 = get_time();
 
@@ -517,18 +596,18 @@ kernel_gpu_opencl_wrapper(	par_str par_cpu,
 
 	printf("Time spent in different stages of GPU_CUDA KERNEL:\n");
 
-	printf("%15.12f s, %15.12f % : GPU: SET DEVICE / DRIVER INIT\n",	(float) (time1-time0) / 1000000, (float) (time1-time0) / (float) (time6-time0) * 100);
-	printf("%15.12f s, %15.12f % : GPU MEM: ALO\n", 					(float) (time2-time1) / 1000000, (float) (time2-time1) / (float) (time6-time0) * 100);
-	printf("%15.12f s, %15.12f % : GPU MEM: COPY IN\n",					(float) (time3-time2) / 1000000, (float) (time3-time2) / (float) (time6-time0) * 100);
+	printf("%15.12f s, %15.12f %% : GPU: SET DEVICE / DRIVER INIT\n",	(float) (time1-time0) / 1000000, (float) (time1-time0) / (float) (time6-time0) * 100);
+	printf("%15.12f s, %15.12f %% : GPU MEM: ALO\n", 					(float) (time2-time1) / 1000000, (float) (time2-time1) / (float) (time6-time0) * 100);
+	printf("%15.12f s, %15.12f %% : GPU MEM: COPY IN\n",					(float) (time3-time2) / 1000000, (float) (time3-time2) / (float) (time6-time0) * 100);
 
-	printf("%15.12f s, %15.12f % : GPU: KERNEL\n",						(float) (time4-time3) / 1000000, (float) (time4-time3) / (float) (time6-time0) * 100);
+	printf("%15.12f s, %15.12f %% : GPU: KERNEL\n",						(float) (time4-time3) / 1000000, (float) (time4-time3) / (float) (time6-time0) * 100);
 
-	printf("%15.12f s, %15.12f % : GPU MEM: COPY OUT\n",				(float) (time5-time4) / 1000000, (float) (time5-time4) / (float) (time6-time0) * 100);
-	printf("%15.12f s, %15.12f % : GPU MEM: FRE\n", 					(float) (time6-time5) / 1000000, (float) (time6-time5) / (float) (time6-time0) * 100);
+	printf("%15.12f s, %15.12f %% : GPU MEM: COPY OUT\n",				(float) (time5-time4) / 1000000, (float) (time5-time4) / (float) (time6-time0) * 100);
+	printf("%15.12f s, %15.12f %% : GPU MEM: FRE\n", 					(float) (time6-time5) / 1000000, (float) (time6-time5) / (float) (time6-time0) * 100);
 
-	printf("Total time:\n");
-	printf("%.12f s\n", 												(float) (time6-time0) / 1000000);
+	printf("Total time: %.12f s\n", 									(float) (time6-time0) / 1000000);
 
+	printf("\nComputation done in %0.3lf ms.\n", TimeDiff(start, end));
 }
 
 //========================================================================================================================================================================================================200

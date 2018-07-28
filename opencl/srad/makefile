@@ -1,11 +1,10 @@
 include ../../common/make.config
 
 CFLAGS += $(OPENCL_INC) $(KERNEL_DIM)
-CXXFLAGS += $(OPENCL_INC) $(KERNEL_DIM)
 SOURCES=main.c kernel/kernel_gpu_opencl_wrapper.c util/graphics/graphics.c util/graphics/resize.c util/opencl/opencl.c
 
 ifdef ALTERA
-	ifdef HOSTONLY
+	ifdef HOST_ONLY
 		AOT_PROGRAMS = 
 	else
 		AOT_PROGRAMS = AOCX

@@ -2,14 +2,22 @@
 #include "../common/opencl_kernel_common.h"
 
 #ifndef BSIZE
-	#if defined(AOCL_BOARD_de5net_a7)
+	#ifdef AOCL_BOARD_de5net_a7
+		#define BSIZE 512
+	#elif  AOCL_BOARD_a10pl4_dd4gb_gx115es3
+		#define BSIZE 1024
+	#else
 		#define BSIZE 512
 	#endif
 #endif
 
 #ifndef SSIZE
-	#if defined(AOCL_BOARD_de5net_a7)
+	#ifdef AOCL_BOARD_de5net_a7
 		#define SSIZE 8
+	#elif  AOCL_BOARD_a10pl4_dd4gb_gx115es3
+		#define SSIZE 8
+	#else
+		#define SSIZE 4
 	#endif
 #endif
 
