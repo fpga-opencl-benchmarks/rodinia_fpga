@@ -158,8 +158,6 @@ void nw_optimized(int *input_itemsets, int *output_itemsets, int *referrence,
         }
     }    
         
-    printf("Processing bottom-right matrix\n");
-
 #ifdef OMP_OFFLOAD
     #pragma omp target
 #endif
@@ -300,7 +298,6 @@ runTest( int argc, char** argv)
 
     //Compute top-left matrix 
     printf("Num of threads: %d\n", omp_num_threads);
-    printf("Processing top-left matrix\n");
    
     energyStart = GetEnergyCPU();
     GetTime(start);

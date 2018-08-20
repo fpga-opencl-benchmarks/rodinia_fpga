@@ -1,23 +1,20 @@
-#include "../common/opencl_kernel_common.h"
-
-inline int maximum(int a,
-	              int b,
-	              int c)
+inline int maximum(int a, int b, int c)
 {
 	int k;
-	if( a <= b )
+	if(a <= b)
 		k = b;
 	else
 		k = a;
 
-	if( k <=c )
+	if(k <= c)
 		return(c);
 	else
 		return(k);
 }
 
-__kernel void nw_kernel1(__global int* RESTRICT reference, 
-                         __global int* RESTRICT input_itemsets,
+__attribute__((max_global_work_dim(0)))
+__kernel void nw_kernel1(__global int* restrict reference, 
+                         __global int* restrict input_itemsets,
                                   int           dim,
                                   int           penalty) 
 {

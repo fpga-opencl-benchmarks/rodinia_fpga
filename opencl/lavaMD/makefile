@@ -30,4 +30,4 @@ all: $(SRC) $(AOT_PROGRAMS)
 	$(CC) $(CFLAGS) $(SRC) -o $(EXE) $(OPENCL_INC) $(OPENCL_LIB) $(EXTRA_FLAGS)
 
 clean:
-	$(RM) $(EXE) *.aoco *.aocx $(KERNEL_NAMES)
+	$(RM) $(EXE) *.aoco $(KERNEL_NAMES)

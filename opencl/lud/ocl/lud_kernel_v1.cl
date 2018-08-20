@@ -1,13 +1,10 @@
-#ifndef BSIZE
-	#define BSIZE 16
-#endif
+#include "../common/common.h"
 
 #define AA(i,j) m[offset * matrix_dim + i * matrix_dim + j + offset]
 #define BB(i,j) m[i * matrix_dim + j]
 
-#include "../common/opencl_kernel_common.h"
 
-__kernel void lud_diagonal(__global float* RESTRICT m, 
+__kernel void lud_diagonal(__global float* restrict m, 
                                     int             matrix_dim, 
                                     int             offset)
 { 
@@ -15,6 +12,9 @@ __kernel void lud_diagonal(__global float* RESTRICT m,
 
 	for (i = 0; i < BSIZE; i++)
 	{
+		// ivdep is added to avoid false dependency on the AA access
+		// k is always smaller than both i and j; hence, AA(i, index) or AA(index, j) will never become equal to AA(i, j)
+		#pragma ivdep array(m)
 		for (j = i; j < BSIZE; j++)
 		{
 			for (k = 0; k < i; k++)
@@ -24,6 +24,9 @@ __kernel void lud_diagonal(__global float* RESTRICT m,
 		}
    
 		float temp = 1.f / AA(i,i);
+		// ivdep is added to avoid false dependency on the AA access
+		// k is always smaller than both i and j; hence, AA(i, index) or AA(index, j) will never become equal to AA(i, j)
+		#pragma ivdep array(m)
 		for (j = i + 1; j < BSIZE; j++)
 		{
 			for (k = 0; k < i; k++)
@@ -35,7 +38,7 @@ __kernel void lud_diagonal(__global float* RESTRICT m,
 	}
 }
 
-__kernel void lud_perimeter(__global float* RESTRICT m, 
+__kernel void lud_perimeter(__global float* restrict m, 
                                      int             matrix_dim, 
                                      int             offset)
 {
@@ -99,7 +102,7 @@ __kernel void lud_perimeter(__global float* RESTRICT m,
 	}
 }
 
-__kernel void lud_internal(__global float* RESTRICT m, 
+__kernel void lud_internal(__global float* restrict m, 
                                     int             matrix_dim, 
                                     int             offset)
 {
@@ -112,7 +115,6 @@ __kernel void lud_internal(__global float* RESTRICT m,
 		int i, j, k, i_global, j_global;
 		float temp_top[BSIZE * BSIZE];
 		float temp_left[BSIZE * BSIZE];
-		float sum[BSIZE] = {0.0f};
             
 		i_global = offset + BSIZE * (1 + chunk_idx / chunk_num);
 		j_global = offset + BSIZE * (1 + chunk_idx % chunk_num);
@@ -126,20 +128,18 @@ __kernel void lud_internal(__global float* RESTRICT m,
 			}
 		}
 
+		// use ivdep since the BB address never repeats
+		#pragma ivdep array(m)
 		for (i = 0; i < BSIZE; i++)
 		{
 			for (j = 0; j < BSIZE; j++)
 			{
-				sum[j] = 0.0f;
+				float sum = 0.0f;
 				for (k = 0; k < BSIZE; k++)
 				{
-					sum[j] += temp_left[BSIZE * i + k] * temp_top[BSIZE * k + j];
+					sum += temp_left[BSIZE * i + k] * temp_top[BSIZE * k + j];
 				}
-			}
-
-			for (j = 0; j < BSIZE; j++)
-			{
-				BB((i + i_global), (j + j_global)) -= sum[j];
+				BB((i + i_global), (j + j_global)) -= sum;
 			}
 		}
 	}

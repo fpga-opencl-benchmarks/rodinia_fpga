@@ -1,7 +1,0 @@
-#!/bin/ksh -x
-export OMP_NUM_THREADS=8
-numactl -N 0 -m 0 ./pathfinder 100000 100 > out
-numactl -N 0 -m 0 ./pathfinder 100000 100 > out
-numactl -N 0 -m 0 ./pathfinder 100000 100 > out
-numactl -N 0 -m 0 ./pathfinder 100000 100 > out
-numactl -N 0 -m 0 ./pathfinder 100000 100 > out

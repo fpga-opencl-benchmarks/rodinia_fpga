@@ -1,3 +1,4 @@
-#4096x4096 input files should be generated manually using the input generator.
+#8192x8192 input files should be generated manually using the input generator.
 threads=$1
-./hotspot 4096 4096 1000 $threads ../../data/hotspot/temp_4096 ../../data/hotspot/power_4096 output.txt
+#./hotspot 8192 8192 2000 $threads ../../data/hotspot/temp_8192 ../../data/hotspot/power_8192 output.txt
+./hotspot 8000 8000 100 $threads ../../data/hotspot/temp_8192 ../../data/hotspot/power_8192

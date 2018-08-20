@@ -1,4 +1,0 @@
-cbdec4941f9c91db9ba7dd8f16ef5eb00691e8f4
-- Host-side adaptation for our own functions
-- No change in the kernel function
-

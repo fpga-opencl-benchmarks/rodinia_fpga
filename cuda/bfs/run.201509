@@ -1,6 +1,0 @@
-#!/bin/ksh -x
-./bfs ../../data/bfs/graph1MW_6.txt
-./bfs ../../data/bfs/graph1MW_6.txt
-./bfs ../../data/bfs/graph1MW_6.txt
-./bfs ../../data/bfs/graph1MW_6.txt
-./bfs ../../data/bfs/graph1MW_6.txt

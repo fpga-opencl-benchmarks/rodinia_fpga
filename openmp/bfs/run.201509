@@ -1,6 +1,0 @@
-#!/bin/ksh -x
-numactl -N 0 -m 0 ./bfs 8 ../../data/bfs/graph1MW_6.txt 
-numactl -N 0 -m 0 ./bfs 8 ../../data/bfs/graph1MW_6.txt 
-numactl -N 0 -m 0 ./bfs 8 ../../data/bfs/graph1MW_6.txt 
-numactl -N 0 -m 0 ./bfs 8 ../../data/bfs/graph1MW_6.txt 
-numactl -N 0 -m 0 ./bfs 8 ../../data/bfs/graph1MW_6.txt 

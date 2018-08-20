@@ -17,6 +17,8 @@ int* result;
 #define M_SEED 9
 int pyramid_height;
 FILE *resultFile;
+char* ofile = NULL;
+bool write_out = 0;
 
 #include <omp.h>
 #include "../../common/timer.h"
@@ -33,17 +35,18 @@ double energy = 0;
 void
 init(int argc, char** argv)
 {
-	if(argc==4){
-
+	if(argc==4 || argc==5){
 		cols = atoi(argv[1]);
-
 		rows = atoi(argv[2]);
-
-                pyramid_height=atoi(argv[3]);
+		pyramid_height=atoi(argv[3]);
+		if (argc == 5){
+			ofile = argv[4];
+			write_out = 1;
+		}
 	}else{
-                printf("Usage: dynproc row_len col_len pyramid_height\n");
-                exit(0);
-        }
+		printf("Usage: %s row_len col_len pyramid_height output_file\n", argv[0]);
+		exit(0);
+	}
 	data = new int[rows*cols];
 
 	wall = new int*[rows];
@@ -213,7 +216,7 @@ int calc_path(int *gpuWall, int *gpuResult[2], int rows, int cols, \
 		{
 			#pragma omp barrier
 #ifdef FOR
-			for(int k = 0; k < 10000; k++)
+			for(int k = 0; k < 100; k++)
 			{
 				if (k == 0)
 				{
@@ -256,14 +259,7 @@ int main(int argc, char** argv)
     int num_devices;
     cudaGetDeviceCount(&num_devices);
     if (num_devices > 1) cudaSetDevice(DEVICE);
-    
-    resultFile = fopen("result.txt", "w");
-    if (resultFile == NULL)
-    {
-        printf("Failed to open result file!\n");
-        exit(-1);
-    }
-
+   
     run(argc,argv);
     
     printf("\nComputation done in %0.3lf ms.\n", totalTime);
@@ -280,12 +276,22 @@ void run(int argc, char** argv)
 {
     init(argc, argv);
 
+    if (write_out)
+    {
+        resultFile = fopen(ofile, "w");
+        if (resultFile == NULL)
+        {
+            printf("Failed to open result file!\n");
+            exit(-1);
+        }
+    }
+
     /* --------------- pyramid parameters --------------- */
     int borderCols = (pyramid_height)*HALO;
     int smallBlockCol = BLOCK_SIZE-(pyramid_height)*HALO*2;
     int blockCols = cols/smallBlockCol+((cols%smallBlockCol==0)?0:1);
 
-    fprintf(resultFile, "pyramidHeight: %d\ngridSize: [%d]\nborder:[%d]\nblockSize: %d\nblockGrid:[%d]\ntargetBlock:[%d]\n",\
+    fprintf(stdout, "pyramidHeight: %d\ngridSize: [%d]\nborder:[%d]\nblockSize: %d\nblockGrid:[%d]\ntargetBlock:[%d]\n",\
 	pyramid_height, cols, borderCols, BLOCK_SIZE, blockCols, smallBlockCol);
 	
     int *gpuWall, *gpuResult[2];
@@ -303,23 +309,22 @@ void run(int argc, char** argv)
 
     cudaMemcpy(result, gpuResult[final_ret], sizeof(int)*cols, cudaMemcpyDeviceToHost);
 
-
-#ifdef BENCH_PRINT
-
-    for (int i = 0; i < cols; i++)
-
-            fprintf(resultFile, "%d ",data[i]) ;
-
-    fprintf(resultFile, "\n") ;
-
-#endif
+    if (write_out)
+    {
+        #ifdef BENCH_PRINT
+        for (int i = 0; i < cols; i++)
+        {
+            fprintf(resultFile, "%d ", data[i]);
+        }
+        fprintf(resultFile, "\n") ;
+        #endif
     
-    for (int i = 0; i < cols; i++)
-
-            fprintf(resultFile, "%d ",result[i]) ;
-
-    fprintf(resultFile, "\n") ;
-
+        for (int i = 0; i < cols; i++)
+        {
+            fprintf(resultFile, "%d\n", result[i]);
+        }
+        fclose(resultFile);
+    }
 
     cudaFree(gpuWall);
     cudaFree(gpuResult[0]);
@@ -328,7 +333,4 @@ void run(int argc, char** argv)
     delete [] data;
     delete [] wall;
     delete [] result;
-    fclose(resultFile);
-
 }
-

@@ -16,7 +16,7 @@
 
 #ifdef _WIN32
 	#define snprintf _snprintf
-	#include <malloc.h> //for alligned malloc
+	#include <malloc.h> //for aligned malloc
 #endif
 
 #define STRING_BUFFER_LEN 1024
@@ -46,15 +46,15 @@ inline static void device_info_string(cl_device_id device, cl_device_info param,
 
 inline static void device_info_device_type(cl_device_id device, cl_device_info param, const char* name)
 {
-        cl_device_type device_type;
+	cl_device_type device_type;
 	CL_SAFE_CALL( clGetDeviceInfo(device, param, sizeof(cl_device_type), &device_type, NULL) );
 	fprintf(stderr, "%-32s= %d\n", name, (int)device_type);
 }
 
-// Prints memory size in MBytes
+// Prints values that are ulong
 inline static void device_info_ulong(cl_device_id device, cl_device_info param, const char* name)
 {
-        cl_ulong size;
+	cl_ulong size;
 	CL_SAFE_CALL( clGetDeviceInfo(device, param, sizeof(cl_ulong), &size, NULL) );
 	if (param == CL_DEVICE_GLOBAL_MEM_SIZE)
 	{
@@ -64,6 +64,23 @@ inline static void device_info_ulong(cl_device_id device, cl_device_info param, 
 	{
 		fprintf(stderr, "%-32s= %0.3lf KBytes\n", name, (double)(size/1024.0));
 	}
+	else
+	{
+		fprintf(stderr, "%-32s= %lu\n", name, size);
+	}
+}
+
+// Prints values that are ulong[3]
+inline static void device_info_ulongarray(cl_device_id device, cl_device_info param, const char* name)
+{
+	cl_ulong* size = (cl_ulong*)malloc(sizeof(cl_ulong) * 3);
+	CL_SAFE_CALL( clGetDeviceInfo(device, param, sizeof(cl_ulong) * 3, size, NULL) );
+	fprintf(stderr, "%-32s= ", name);
+	for (int i = 0; i < 2; i++)
+	{
+		fprintf(stderr, "%lu, ", size[i]);
+	}
+	fprintf(stderr, "%lu\n", size[2]);
 }
 
 // Displays available platforms and devices
@@ -91,7 +108,7 @@ inline static void display_device_info(cl_platform_id** platforms, cl_uint* plat
 			{
 				fprintf(stderr, "================================================================================\n");
 				fprintf(stderr, "Platform number %d:\n\n", i);
-				fprintf(stderr, "No devices were found in this platfrom!\n");
+				fprintf(stderr, "No devices were found in this platform!\n");
 				fprintf(stderr, "================================================================================\n\n");
 			}
 			else
@@ -199,7 +216,7 @@ inline static void validate_selection(cl_platform_id* platforms, cl_uint* platfo
 			{
 				fprintf(stderr, "================================================================================\n");
 				fprintf(stderr, "Platform number: %d\n", i);
-				fprintf(stderr, "No compatible devices found, moving to next platfrom, if any.\n");
+				fprintf(stderr, "No compatible devices found, moving to next platform, if any.\n");
 				fprintf(stderr, "================================================================================\n\n");
 			}
 			else
@@ -216,7 +233,7 @@ inline static void validate_selection(cl_platform_id* platforms, cl_uint* platfo
 			CL_SAFE_CALL( clGetDeviceInfo(devices[0], CL_DEVICE_NAME, STRING_BUFFER_LEN, &deviceName, NULL) );
 			
 			fprintf(stderr, "================================================================================\n");
-			fprintf(stderr, "Selected platfrom number: %d\n", i);
+			fprintf(stderr, "Selected platform number: %d\n", i);
 			fprintf(stderr, "Device count: %d\n", deviceCount);
 			fprintf(stderr, "Device type: %d\n", (int) *device_type);
 			fprintf(stderr, "Selected device: %s\n", deviceName);
@@ -385,7 +402,7 @@ inline static char* getVersionedKernelName(const char* kernel_name,
   int slen = strlen(kernel_name) + 32;
   char *vname = (char *)malloc(sizeof(char)*(slen));
   // versioning
-#if defined(ALTERA_CL)
+#if defined(ALTERA)
   snprintf(vname, slen, "%s_v%d.aocx", kernel_name, version);
 #elif defined(USE_JIT)
   snprintf(vname, slen, "%s_v%d.cl", kernel_name, version);
@@ -401,7 +418,7 @@ inline static char* getVersionedKernelName2(const char* kernel_name,
   int slen = strlen(kernel_name) + 128;
   char *vname = (char *)malloc(sizeof(char)*(slen));
   // versioning
-#if defined(ALTERA_CL)
+#if defined(ALTERA)
   snprintf(vname, slen, "%s_%s.aocx", kernel_name, version_string);
 #elif defined(USE_JIT)
   snprintf(vname, slen, "%s_%s.cl", kernel_name, version_string);
@@ -472,7 +489,7 @@ inline static void init_fpga2(int *argc, char ***argv,
   }
 
   // version number given
-  fprintf(stderr, "Using verison %d (%s)\n", *version_number,
+  fprintf(stderr, "Using version %d (%s)\n", *version_number,
           *version_string);
   
   //shift_argv(argc, argv, shift);
@@ -500,7 +517,7 @@ inline static char* read_kernel(const char *kernel_file_path, size_t *source_siz
 		exit(-1);
 	}
 
-	// Detremine the size of the input kernel or binary file
+	// Determine the size of the input kernel or binary file
 	fseek(kernel_file, 0, SEEK_END);
 	*source_size = ftell(kernel_file);
 	rewind(kernel_file);

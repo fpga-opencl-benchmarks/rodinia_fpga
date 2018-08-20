@@ -245,9 +245,6 @@ void load_kernels(const std::string &kernel_prefix) {
   sprintf(clOptions, "-I.");
 
 #ifdef USE_JIT
-#ifdef USE_RESTRICT
-  sprintf(clOptions + strlen(clOptions), " -DUSE_RESTRICT");
-#endif  
   sprintf(clOptions + strlen(clOptions), " -DBSIZE=%d", block_size);
 #endif
   printf("kernel compile options: %s\n", clOptions);

@@ -1,3 +1,3 @@
 threads=$1
 #./omp/lud_omp -n $threads -i ../../data/lud/2048.dat
-./omp/lud_omp -s 8192 -n $threads
+./omp/lud_omp -s 11520 -n $threads

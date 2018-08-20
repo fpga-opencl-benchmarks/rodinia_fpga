@@ -240,24 +240,25 @@ void readinput(float *vect, int grid_rows, int grid_cols, int layers, char *file
     float val;
 
     if( (fp  = fopen(file, "r" )) ==0 )
-      fatal( "The file was not opened" );
+    {
+      fatal( "The input file could not be opened!" );
+      exit(-1);
+    }
 
+    for (k=0; k < layers; k++)
+      for (i=0; i < grid_rows; i++) 
+        for (j=0; j < grid_cols; j++)
+        {
+          if (fgets(str, STR_SIZE, fp) == NULL) fatal("Error reading file\n");
+          if (feof(fp))
+            fatal("not enough lines in file");
+          //if ((sscanf(str, "%d%f", &index, &val) != 2) || (index != ((i-1)*(grid_cols-2)+j-1)))
+          if ((sscanf(str, "%f", &val) != 1))
+            fatal("invalid file format");
+          vect[i*grid_cols+j+k*grid_rows*grid_cols] = val;
+        }
 
-    for (i=0; i <= grid_rows-1; i++) 
-      for (j=0; j <= grid_cols-1; j++)
-        for (k=0; k <= layers-1; k++)
-          {
-            if (fgets(str, STR_SIZE, fp) == NULL) fatal("Error reading file\n");
-            if (feof(fp))
-              fatal("not enough lines in file");
-            //if ((sscanf(str, "%d%f", &index, &val) != 2) || (index != ((i-1)*(grid_cols-2)+j-1)))
-            if ((sscanf(str, "%f", &val) != 1))
-              fatal("invalid file format");
-            vect[i*grid_cols+j+k*grid_rows*grid_cols] = val;
-          }
-
-    fclose(fp);	
-
+    fclose(fp);
 }
 
 
@@ -268,18 +269,19 @@ void writeoutput(float *vect, int grid_rows, int grid_cols, int layers, char *fi
     char str[STR_SIZE];
 
     if( (fp = fopen(file, "w" )) == 0 )
-      printf( "The file was not opened\n" );
+    {
+      fatal( "The output file could not be opened!" );
+      exit(-1);
+    }
 
-
-    for (i=0; i < grid_rows; i++) 
-      for (j=0; j < grid_cols; j++)
-        for (k=0; k < layers; k++)
-
-          {
-            sprintf(str, "%d\t%g\n", index, vect[i*grid_cols+j+k*grid_rows*grid_cols]);
-            fputs(str,fp);
-            index++;
-          }
+    for (k=0; k < layers; k++)
+      for (i=0; i < grid_rows; i++) 
+        for (j=0; j < grid_cols; j++)
+        {
+          sprintf(str, "%d\t%.12f\n", index, vect[i*grid_cols+j+k*grid_rows*grid_cols]);
+          fputs(str,fp);
+          index++;
+        }
 
     fclose(fp);	
 }
@@ -313,7 +315,6 @@ void computeTempCPU(float *pIn, float* tIn, float *tOut,
                     b = (z == 0) ? c : c - nx * ny;
                     t = (z == nz - 1) ? c : c + nx * ny;
 
-
                     tOut[c] = tIn[c]*cc + tIn[n]*cn + tIn[s]*cs + tIn[e]*ce + tIn[w]*cw + tIn[t]*ct + tIn[b]*cb + (dt/Cap) * pIn[c] + ct*amb_temp;
                 }
         float *temp = tIn;
@@ -322,7 +323,6 @@ void computeTempCPU(float *pIn, float* tIn, float *tOut,
         i++;
     }
     while(i < numiter);
-
 }
 
 float accuracy(float *arr1, float *arr2, int len)

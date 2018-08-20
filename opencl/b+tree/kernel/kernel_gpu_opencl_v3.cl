@@ -1,5 +1,4 @@
 #include "../problem_size.h"
-#include "../../common/opencl_kernel_common.h"
 
 // #ifdef __cplusplus
 // extern "C" {
@@ -60,13 +59,13 @@ typedef struct knode {
 
 __kernel void 
 findK(long height,
-      __global knode * RESTRICT knodesD,
+      __global knode * restrict knodesD,
       long knodes_elem,
-      __global record * RESTRICT recordsD,
-      __global long * RESTRICT currKnodeD,
-      __global long * RESTRICT offsetD,
-      __global int * RESTRICT keysD, 
-      __global record * RESTRICT ansD,
+      __global record * restrict recordsD,
+      __global long * restrict currKnodeD,
+      __global long * restrict offsetD,
+      __global int * restrict keysD, 
+      __global record * restrict ansD,
       int count,
       int order) {
   // Similar to the OpenMP version

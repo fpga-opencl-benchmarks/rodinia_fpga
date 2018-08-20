@@ -7,6 +7,11 @@ CXXLAGS += $(INC)
 CSOURCES=common/common.c
 CPPSOURCES=ocl/lud.cpp
 
+ifdef BSIZE
+	CFLAGS += -DBSIZE=$(BSIZE)
+	CXXLAGS += -DBSIZE=$(BSIZE)
+endif
+
 ifeq ($(OS),Windows_NT)
 	EXE=lud.exe
 	LDFLAGS+=/out:$@

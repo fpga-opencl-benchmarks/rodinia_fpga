@@ -1,313 +1,419 @@
-#include "../common/opencl_kernel_common.h"
+#include "../common/common.h"
+// peri collapsed exit condition: 64,4 -->4*( (1+(64/4-1)) * (64/4-1)/2) + (4-1) * 64/4
 
-#define REDUCE_LATENCY 8
-#define BSIZE 8
-#define BSIZE_LOG 3
+#define FADD_LATENCY 8
 
-#define GA(i,j,block_offset) block_offset + i*size + j						// calculates global address in the matrix
-#define LA(i,j)              (i << BSIZE_LOG) + j						// calculates local address in the block
+#ifndef DIA_UNROLL
+	#define DIA_UNROLL 2
+#endif
 
-__kernel void lud(__global float* RESTRICT a, int size)
+#ifndef PERI_UNROLL
+	#define PERI_UNROLL 2
+#endif
+
+#ifndef INT_UNROLL
+	#define INT_UNROLL 2
+#endif
+
+#ifndef MEM_UNROLL
+	#define MEM_UNROLL 16
+#endif
+
+
+__attribute__((max_global_work_dim(0)))
+__kernel void lud_diagonal(__global float* restrict matrix, 
+                                    int             matrix_dim, 
+                                    int             offset)
 {
-	int i, j, k, m;
-	int offset, block_offset, block_offset_row, block_offset_col, block_offset_chunk;
-	int chunk_id, chunk_id_x, chunk_id_y, chunk_size;
-	float shift_reg1[REDUCE_LATENCY+1], shift_reg2[REDUCE_LATENCY+1];
-	float sum, temp;
-	float mem_dia[BSIZE*BSIZE], mem_row[BSIZE*BSIZE], mem_col[BSIZE*BSIZE];
+	float dia[BSIZE * BSIZE];
 
-	for (offset = 0; offset < size; offset = offset + BSIZE)
+	int i1 = 0;
+	int j1 = 0;
+	int index1 = 0;
+	int array_offset = offset * matrix_dim + offset;
+
+	#pragma ivdep
+	while (index1 != (BSIZE * BSIZE / MEM_UNROLL))
 	{
-		block_offset = offset*size + offset;						// the block is always on the main diagonal
-
-		//======================================================================
-		// diagonal block
-		//======================================================================
-
-		// loading block into on-chip memory
-		for (i = 0; i < BSIZE; i++)
+		#pragma unroll
+		for (int j_loc = 0; j_loc < MEM_UNROLL; j_loc++)
 		{
+			int j_real = j1 * MEM_UNROLL + j_loc;
+
+			dia[i1 * BSIZE + j_real] = matrix[array_offset + j_real];
+		}
+
+		if (j1 == (BSIZE / MEM_UNROLL) - 1)
+		{
+			j1 = 0;
+			i1++;
+			array_offset += matrix_dim;
+		}
+		else
+		{
+			j1++;
+		}
+
+		index1++;
+	}
+
+	for (int i = 0; i < BSIZE; i++)
+	{
+		int exit = (i % DIA_UNROLL == 0) ? i/DIA_UNROLL : i/DIA_UNROLL + 1;
+
+		// ivdep is added to avoid false dependency on the dia buffer
+		// k is always smaller than both i and j; hence, dia(i, index) or dia(index, j) will never become equal to dia(i, j)
+		#pragma ivdep array(dia)
+		for (int j = i; j < BSIZE; j++)
+		{
+			float shift_reg[FADD_LATENCY] = {0.0f};
+
+			for (int k = 0; k < exit; k++)
+			{
+				float sum = 0.0f;
+
+				#pragma unroll
+				for (int m = 0; m < DIA_UNROLL; m++)
+				{
+					int index = k * DIA_UNROLL + m;
+					if (index < i)
+					{
+						sum += dia[i * BSIZE + index] * dia[index * BSIZE + j];
+					}
+				}
+				shift_reg[FADD_LATENCY - 1] = shift_reg[0] - sum;
+
+				// shifting
+				#pragma unroll
+				for (int l = 0; l < FADD_LATENCY - 1; l++)
+				{
+					shift_reg[l] = shift_reg[l + 1];
+				}
+			}
+
+			//final reduction
 			#pragma unroll
-			for (j = 0; j < BSIZE; j++)
+			for (int l = 0; l < FADD_LATENCY - 1; l++)
 			{
-				mem_dia[LA(i,j)] = a[GA(i,j,block_offset)];
+				dia[i * BSIZE + j] += shift_reg[l];
 			}
 		}
 
-		// computation on block
-		for (i = 0; i < BSIZE; i++)
+		// ivdep is added to avoid false dependency on the dia buffer
+		// k is always smaller than both i and j; hence, dia(i, index) or dia(index, j) will never become equal to dia(i, j)
+		#pragma ivdep array(dia)
+		for (int j = i + 1; j < BSIZE; j++)
 		{
-			for (j = 0; j < BSIZE; j++)
+			float shift_reg[FADD_LATENCY] = {0.0f};
+
+			for (int k = 0; k < exit; k++)
 			{
-				// initiliaze shift register
+				float sum = 0.0f;
+
 				#pragma unroll
-				for (m = 0; m < REDUCE_LATENCY+1; m++)
+				for (int k_loc = 0; k_loc < DIA_UNROLL; k_loc++)
 				{
-					shift_reg1[m] = 0;
-				}
-
-				for (k = 0; k < BSIZE; k++)
-				{
-					// reduction
-					if (j >= i && k < i)
+					int k_real = k * DIA_UNROLL + k_loc;
+					if (k_real < i)
 					{
-						shift_reg1[REDUCE_LATENCY] = shift_reg1[0] - mem_dia[LA(i,k)]*mem_dia[LA(k,j)]*1.0;
-					}
-					else
-					{
-						shift_reg1[REDUCE_LATENCY] = shift_reg1[0] - mem_dia[LA(i,k)]*mem_dia[LA(k,j)]*0;
-					}
-
-					// shifting
-					#pragma unroll
-					for (m = 0; m < REDUCE_LATENCY; m++)
-					{
-						shift_reg1[m] = shift_reg1[m+1];
+						sum += dia[j * BSIZE + k_real] * dia[k_real * BSIZE + i];
 					}
 				}
+				shift_reg[FADD_LATENCY - 1] = shift_reg[0] - sum;
 
-				// final reduction
+				// shifting
 				#pragma unroll
-				for (m = 0; m < REDUCE_LATENCY; m++)
+				for (int l = 0; l < FADD_LATENCY - 1; l++)
 				{
-					mem_dia[LA(i,j)] = mem_dia[LA(i,j)] + shift_reg1[m];
+					shift_reg[l] = shift_reg[l + 1];
 				}
 			}
 
-			// in the next loop, the value of mem_dia[LA(i,i)] is fixed (for each i) and is reused j times and never overwritten
-			temp = mem_dia[LA(i,i)];
-			for (j = 0; j < BSIZE; j++)
-			{
-				// initiliaze shift register
-				#pragma unroll
-				for (m = 0; m < REDUCE_LATENCY+1; m++)
-				{
-					shift_reg1[m] = 0;
-				}
-
-				for (k = 0; k < BSIZE; k++)
-				{
-					// reduction
-					if (j >= i+1 && k < i)
-					{
-						shift_reg1[REDUCE_LATENCY] = shift_reg1[0] - mem_dia[LA(j,k)]*mem_dia[LA(k,i)]*1.0;
-					}
-					else
-					{
-						shift_reg1[REDUCE_LATENCY] = shift_reg1[0] - mem_dia[LA(j,k)]*mem_dia[LA(k,i)]*0;
-					}
-
-					// shifting
-					#pragma unroll
-					for (m = 0; m < REDUCE_LATENCY; m++)
-					{
-						shift_reg1[m] = shift_reg1[m+1];
-					}
-				}
-
-				// final reduction
-				sum = 0;
-				#pragma unroll
-				for (m = 0; m < REDUCE_LATENCY; m++)
-				{
-					sum = sum + shift_reg1[m];
-				}
-
-				if (j >= i+1)
-				{
-					mem_dia[LA(j,i)] = (mem_dia[LA(j,i)] + sum)/temp;
-				}
-				else
-				{
-					mem_dia[LA(j,i)] = (mem_dia[LA(j,i)] + sum)/1.0;
-				}
-			}
-		}
-
-		// writing back to global memory
-		for (i = 1; i < BSIZE; i++)						// first row is unchanged, we will not write it back
-		{
+			float sum = dia[j * BSIZE + i];
+			//final reduction
 			#pragma unroll
-			for (j = 0; j < BSIZE; j++)
+			for (int l = 0; l < FADD_LATENCY - 1; l++)
 			{
-				a[GA(i,j,block_offset)] = mem_dia[LA(i,j)];
+				sum += shift_reg[l];
 			}
+			dia[j * BSIZE + i] = sum / dia[i * BSIZE + i];
+		}
+	}
+
+	int i2 = 0;
+	int j2 = 0;
+	int index2 = 0;
+	array_offset = offset * matrix_dim + offset;
+
+	#pragma ivdep
+	while (index2 != (BSIZE * BSIZE / MEM_UNROLL))
+	{
+		#pragma unroll
+		for (int j_loc = 0; j_loc < MEM_UNROLL; j_loc++)
+		{
+			int j_real = j2 * MEM_UNROLL + j_loc;
+
+			matrix[array_offset + j_real] = dia[i2 * BSIZE + j_real];
 		}
 
-		//======================================================================
-		// perimeter blocks
-		//======================================================================
-
-		// the content of the diag local buffer will be reused here
-		// we want to process two perimeter blocks in parallel, one in the current row and one in the current column
-		// reason why we use two separate local buffers
-
-		chunk_size = ((size - offset) >> BSIZE_LOG) - 1;				// offset starts from zero, hence the "-1"
-		for (chunk_id = 0; chunk_id < chunk_size; chunk_id++)
+		if (j2 == (BSIZE / MEM_UNROLL) - 1)
 		{
-			block_offset_row = block_offset + ((chunk_id+1) << BSIZE_LOG);	// chunk_id starts from zero, hence the "+1"
-			block_offset_col = block_offset + ((chunk_id+1) << BSIZE_LOG) * size;
-
-			// loading two block into on-chip memory
-			// two separate loops on j are used here to ensure correct coalescing
-			for (i = 0; i < BSIZE; i++)
-			{
-				#pragma unroll
-				for (j = 0; j < BSIZE; j++)
-				{
-					mem_row[LA(i,j)] = a[GA(i,j,block_offset_row)];		// the "chunk_id+1"th block to the right of the current diagonal block
-				}
-				#pragma unroll
-				for (j = 0; j < BSIZE; j++)
-				{
-					mem_col[LA(i,j)] = a[GA(i,j,block_offset_col)];		// the "chunk_id+1"th block to the bottom of the current diagonal block
-				}
-			}
-
-			// in the following two loops, since nothing happens on mem_row when i == 0 and only the division part
-			// ...is applied on mem_col, we take the computation of i == 0 out of the second loop and put it here
-			// ...to avoid all the unneeded shifting and everything on the shift registers, and start the second loop from i = 1
-			temp = mem_dia[LA(0,0)];						// i = 0
-			for (j = 0; j < BSIZE; j++)
-			{
-				mem_col[LA(j,0)] = mem_col[LA(j,0)]/temp;
-			}
-
-			for (i = 1; i < BSIZE; i++)
-			{
-				// same as before, the value of mem_dia[LA(i,i)] is fixed (for each i) and is reused j times and never overwritten
-				temp = mem_dia[LA(i,i)];
-				for (j = 0; j < BSIZE; j++)
-				{
-					// initiliaze shift register
-					#pragma unroll
-					for (m = 0; m < REDUCE_LATENCY+1; m++)
-					{
-						shift_reg1[m] = 0;
-						shift_reg2[m] = 0;
-					}
-
-					for (k = 0; k < BSIZE; k++)
-					{
-						// reduction
-						if (k < i)
-						{
-							shift_reg1[REDUCE_LATENCY] = shift_reg1[0] - mem_dia[LA(i,k)]*mem_row[LA(k,j)]*1.0;
-							shift_reg2[REDUCE_LATENCY] = shift_reg2[0] - mem_dia[LA(k,i)]*mem_col[LA(j,k)]*1.0;
-						}
-						else
-						{
-							shift_reg1[REDUCE_LATENCY] = shift_reg1[0] - mem_dia[LA(i,k)]*mem_row[LA(k,j)]*0;
-							shift_reg2[REDUCE_LATENCY] = shift_reg2[0] - mem_dia[LA(k,i)]*mem_col[LA(j,k)]*0;
-						}
-
-						// shifting
-						#pragma unroll
-						for (m = 0; m < REDUCE_LATENCY; m++)
-						{
-							shift_reg1[m] = shift_reg1[m+1];
-							shift_reg2[m] = shift_reg2[m+1];
-						}
-					}
-
-					// final reduction
-					sum = 0;
-					#pragma unroll
-					for (m = 0; m < REDUCE_LATENCY; m++)
-					{
-						mem_row[LA(i,j)] = mem_row[LA(i,j)] + shift_reg1[m];	// no need to put this in a temp sum variable
-						sum = sum + shift_reg2[m];				// this one needs sum variable due to division outside of the loop
-					}
-					mem_col[LA(j,i)] = (mem_col[LA(j,i)] + sum)/temp;
-				}
-			}
-
-			// writing back to global memory
-			for (i = 1; i < BSIZE; i++)						// first row has not changed, hence we start from i = 1
-			{
-				#pragma unroll
-				for (j = 0; j < BSIZE; j++)
-				{
-					a[GA(i,j,block_offset_row)] = mem_row[LA(i,j)];
-				}
-			}
-			for (i = 0; i < BSIZE; i++)
-			{
-				#pragma unroll
-				for (j = 0; j < BSIZE; j++)
-				{
-					a[GA(i,j,block_offset_col)] = mem_col[LA(i,j)];
-				}
-			}
+			j2 = 0;
+			i2++;
+			array_offset += matrix_dim;
+		}
+		else
+		{
+			j2++;
 		}
 
-		//======================================================================
-		// internal blocks
-		//======================================================================
+		index2++;
+	}
+}
 
-		// here to calculate each block, we need the topmost block in the same column and the leftmost block in the row
-		// movement on blocks is row by row which allows us to reuse the content of the mem_col buffer for each row
-		// mem_col and mem_row here do NOT refer to the necessary block on the same column and row, but rather, the exact opposite of it
-		// ...this is the result of the naming sceme we used in calculating the perimeter blocks
+__attribute__((max_global_work_dim(0)))
+__kernel void lud_perimeter(__global float* restrict matrix, 
+                                     int             matrix_dim, 
+                                     int             offset,
+                                     int             offset_2)
+{
+	float dia[BSIZE * BSIZE], peri_col[BSIZE * BSIZE], peri_row[BSIZE * BSIZE];
 
-		for (chunk_id_y = 0; chunk_id_y < chunk_size; chunk_id_y++)
+	int i1 = 0;
+	int j1 = 0;
+	int index1 = 0;
+	int array_offset_1 = offset * matrix_dim + offset;
+	int array_offset_2 = offset * matrix_dim + offset_2;
+	int array_offset_3 = offset_2 * matrix_dim + offset;
+
+	#pragma ivdep
+	while (index1 != (BSIZE * BSIZE / MEM_UNROLL))
+	{
+		#pragma unroll
+		for (int j_loc = 0; j_loc < MEM_UNROLL; j_loc++)
 		{
-			block_offset_col = block_offset + ((chunk_id_y+1) << BSIZE_LOG) * size;							// for leftmost block in the same block row
+			int j_real = j1 * MEM_UNROLL + j_loc;
 
-			// loading leftmost block in the same block row into on-chip memory
-			for (i = 0; i < BSIZE; i++)
+			dia[i1 * BSIZE + j_real] = matrix[array_offset_1 + j_real];
+			peri_row[i1 * BSIZE + j_real] = matrix[array_offset_2 + j_real];
+			peri_col[i1 * BSIZE + j_real] = matrix[array_offset_3 + j_real];
+		}
+
+		if (j1 == (BSIZE / MEM_UNROLL) - 1)
+		{
+			j1 = 0;
+			i1++;
+			array_offset_1 += matrix_dim;
+			array_offset_2 += matrix_dim;
+			array_offset_3 += matrix_dim;
+		}
+		else
+		{
+			j1++;
+		}
+
+		index1++;
+	}
+
+	// processing perimeter row
+	for (int j = 0; j < BSIZE; j++)
+	{
+		for (int i = 0; i < BSIZE; i++)
+		{
+			float shift_reg[FADD_LATENCY] = {0.0f};
+
+			int exit = (i % PERI_UNROLL == 0) ? i/PERI_UNROLL : i/PERI_UNROLL + 1;
+
+			for (int k = 0; k < exit; k++)
 			{
+				float sum = 0.0f;
+
 				#pragma unroll
-				for (j = 0; j < BSIZE; j++)
+				for (int k_loc = 0; k_loc < PERI_UNROLL; k_loc++)
 				{
-					mem_col[LA(i,j)] = a[GA(i,j,block_offset_col)];
+					int k_real = k * PERI_UNROLL + k_loc;
+					if (k_real < i)
+					{
+						sum += dia[BSIZE * i + k_real] * peri_row[k_real * BSIZE + j];
+					}
+				}
+
+				// reduction
+				shift_reg[FADD_LATENCY - 1] = shift_reg[0] + sum;
+
+				// shifting
+				#pragma unroll
+				for (int l = 0; l < FADD_LATENCY - 1; l++)
+				{
+					shift_reg[l] = shift_reg[l + 1];
 				}
 			}
 
-			for (chunk_id_x = 0; chunk_id_x < chunk_size; chunk_id_x++)
+			// final reduction
+			float sum_final = 0.0f;
+			#pragma unroll
+			for (int l = 0; l < FADD_LATENCY - 1; l++)
 			{
-				block_offset_row = block_offset + ((chunk_id_x+1) << BSIZE_LOG);							// for topmost block in the same block column
-				block_offset_chunk = block_offset + ((chunk_id_y+1) << BSIZE_LOG) * size + ((chunk_id_x+1) << BSIZE_LOG);	// for current block
+				sum_final += shift_reg[l];
+			}
 
-				// loading topmost block in the same block column and current block into on-chip memory
-				for (i = 0; i < BSIZE; i++)
+			peri_row[i * BSIZE + j] = peri_row[i * BSIZE + j] - sum_final;
+		}
+	}
+
+	// processing perimeter column
+	for (int i = 0; i < BSIZE; i++)
+	{
+		for (int j = 0; j < BSIZE; j++)
+		{
+			float shift_reg[FADD_LATENCY] = {0.0f};
+
+			int exit = (j % PERI_UNROLL == 0) ? j/PERI_UNROLL : j/PERI_UNROLL + 1;
+
+			for (int k = 0; k < exit; k++)
+			{
+				float sum = 0.0f;
+
+				#pragma unroll
+				for (int k_loc = 0; k_loc < PERI_UNROLL; k_loc++)
 				{
-					#pragma unroll
-					for (j = 0; j < BSIZE; j++)
+					int k_real = k * PERI_UNROLL + k_loc;
+					if (k_real < j)
 					{
-						mem_row[LA(i,j)] = a[GA(i,j,block_offset_row)];
-					}
-					#pragma unroll
-					for (j = 0; j < BSIZE; j++)
-					{
-						mem_dia[LA(i,j)] = a[GA(i,j,block_offset_chunk)];
+						sum += peri_col[i * BSIZE + k_real] * dia[BSIZE * k_real + j];
 					}
 				}
 
-				for (i = 0; i < BSIZE; i++)
-				{
-					#pragma unroll
-					for (j = 0; j < BSIZE; j++)
-					{
-						// since the following loop is fully unrolled, it doesn't need reduction
-						#pragma unroll
-						for (k = 0; k < BSIZE; k++)
-						{
-							mem_dia[LA(i,j)] = mem_dia[LA(i,j)] - mem_col[LA(i,k)]*mem_row[LA(k,j)];
-						}
-					}
-				}
+				// reduction
+				shift_reg[FADD_LATENCY - 1] = shift_reg[0] + sum;
 
-				// wrting current chunk back to global memory
-				for (i = 0; i < BSIZE; i++)
+				// shifting
+				#pragma unroll
+				for (int l = 0; l < FADD_LATENCY - 1; l++)
 				{
-					#pragma unroll
-					for (j = 0; j < BSIZE; j++)
-					{
-						a[GA(i,j,block_offset_chunk)] = mem_dia[LA(i,j)];
-					}
+					shift_reg[l] = shift_reg[l + 1];
 				}
 			}
+
+			// final reduction
+			float sum_final = 0.0f;
+			#pragma unroll
+			for (int l = 0; l < FADD_LATENCY - 1; l++)
+			{
+				sum_final += shift_reg[l];
+			}
+
+			int i_here = offset_2 + i;
+			int j_here = offset + j;
+			peri_col[i * BSIZE + j] = (peri_col[i * BSIZE + j] - sum_final) / dia[BSIZE * j + j];
+		}
+	}
+
+	int i2 = 0;
+	int j2 = 0;
+	int index2 = 0;
+	array_offset_2 = offset * matrix_dim + offset_2;
+	array_offset_3 = offset_2 * matrix_dim + offset;
+
+	#pragma ivdep
+	while (index2 != (BSIZE * BSIZE / MEM_UNROLL))
+	{
+		#pragma unroll
+		for (int j_loc = 0; j_loc < MEM_UNROLL; j_loc++)
+		{
+			int j_real = j2 * MEM_UNROLL + j_loc;
+
+			matrix[array_offset_2 + j_real] = peri_row[i2 * BSIZE + j_real];
+			matrix[array_offset_3 + j_real] = peri_col[i2 * BSIZE + j_real];
+		}
+
+		if (j2 == (BSIZE / MEM_UNROLL) - 1)
+		{
+			j2 = 0;
+			i2++;
+			array_offset_1 += matrix_dim;
+			array_offset_2 += matrix_dim;
+			array_offset_3 += matrix_dim;
+		}
+		else
+		{
+			j2++;
+		}
+
+		index2++;
+	}
+}
+
+__attribute__((max_global_work_dim(0)))
+__kernel void lud_internal(__global float* restrict matrix, 
+                                    int             matrix_dim,
+                                    int             offset,
+                                    int             i_global,
+                                    int             j_global)
+{
+	float peri_row[BSIZE * BSIZE];
+	float peri_col[BSIZE * BSIZE];
+
+	int i1 = 0;
+	int j1 = 0;
+	int index1 = 0;
+
+	#pragma ivdep
+	while (index1 != (BSIZE * BSIZE / MEM_UNROLL))
+	{
+		#pragma unroll
+		for (int j_loc = 0; j_loc < MEM_UNROLL; j_loc++)
+		{
+			int j_real = j1 * MEM_UNROLL + j_loc;
+
+			peri_row[i1 * BSIZE + j_real] = matrix[matrix_dim * (i1 + offset) + j_real + j_global];
+			peri_col[i1 * BSIZE + j_real] = matrix[matrix_dim * (i1 + i_global) + offset + j_real];
+		}
+
+		if (j1 == (BSIZE / MEM_UNROLL) - 1)
+		{
+			j1 = 0;
+			i1++;
+		}
+		else
+		{
+			j1++;
+		}
+
+		index1++;
+	}
+
+	int i2 = 0;
+	int j2 = 0;
+	int index2 = 0;
+	// use ivdep since the BB address never repeats
+	#pragma ivdep array(matrix)
+	while (index2 != (BSIZE * BSIZE / INT_UNROLL))
+	{
+		index2++;
+
+		#pragma unroll
+		for (int j_loc = 0; j_loc < INT_UNROLL; j_loc++)
+		{
+			float sum = 0.0f;
+			int j_real = j2 * INT_UNROLL + j_loc;
+
+			#pragma unroll
+			for (int k = 0; k < BSIZE; k++)
+			{
+				sum += peri_col[BSIZE * i2 + k] * peri_row[BSIZE * k + j_real];
+			}
+			matrix[(i2 + i_global) * matrix_dim + (j_real + j_global)] -= sum;
+		}
+
+		if (j2 == (BSIZE / INT_UNROLL) - 1)
+		{
+			j2 = 0;
+			i2++;
+		}
+		else
+		{
+			j2++;
 		}
 	}
 }

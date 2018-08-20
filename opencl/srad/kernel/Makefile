@@ -18,4 +18,4 @@ AOCX: $(AOT_PROGRAMS)
 CFPGA_FLAGS += $(KERNEL_DIM) -I..
 
 clean:
-	$(RM) *.aoco *.aocx $(KERNEL_NAMES)
+	$(RM) *.aoco $(KERNEL_NAMES)

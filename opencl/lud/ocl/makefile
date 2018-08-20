@@ -15,5 +15,5 @@ endif
 AOCX: $(AOT_PROGRAMS)
 
 clean:
-	$(RM) ../$(EXE) *.aoco *.aocx lud_kernel
+	$(RM) ../$(EXE) *.aoco lud_kernel
 	cd ../; $(RM) $(OBJECTS)

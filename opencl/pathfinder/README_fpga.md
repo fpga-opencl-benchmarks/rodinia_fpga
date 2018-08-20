@@ -26,6 +26,18 @@ Parameter `<row-lenght>` specifies the length of each row, `<column-length>` the
 
 # Kernel variations
 
+## v0
+
+Same as original Rodinia kernel with restrict and removal of unused
+kernel arguments. Local buffers definition is also moved from kernel
+argument space to inside of the kernel. The former case, apart from being
+a very bad design practice, also breaks area estimation in earlier versions
+of Intel's OpenCL Compiler since the area usage by these buffers is not
+taken into account. Finally, when such buffers are defined as a kernel
+argument, their size must be a power of two or else compilation will fail,
+while such limitation does not exist for local buffers defined inside of
+the kernel.
+
 ## v1
 
 Single work-item version based on OpenMP version of the benchmark
@@ -35,36 +47,36 @@ swapped row by row.
 
 ## v2
 
-Restrict, 16 SIMD, 2 compute units, automatic local memory sharing
-between compute units performed by aoc
+On top of v0, adds reqd_work_group_size attribute alongside with SIMD,
+compute unit replication and unrolling.
 
 ## v3
 
-v1 with some loop unrolling and __attribute__((max_global_work_dim(0))).
+Compared to v1, moves external memory accesses out of branches to allow
+correct access coalescing under the presence of loop unrolling and then
+unrolls in the innermost loop. Also adds __attribute__((max_global_work_dim(0))).
 
 ## v4
 
-Same as v2 but with 4 compute units (maximum number of compute units
-with sub-80% logic usage on Startix V). Local memory sharing is
-automatically disabled by aoc due to block ram overutilization.
+Based on v2. Replaces result buffer with private register. Corrects access
+coalescing to prev buffer by moving access to the remaining local buffer
+outside of conditional statements and replacing them with temporary registers.
+Also merges the write from external memory and the one from the output of the
+previous iteration to the local buffer into one right using conditional statement
+on a temporary register. Reduces number of reads and writes to 3 and 1 regardless
+of SIMD size. Also keeps an unnecessary barrier to increase number of simultaneous
+work-groups. Overall, exact same strategy as Hotspot 2D v4.
 
 ## v5
 
-Each iteration computes a sub section of a row, and proceeds to the
-net row at the diagonal position. The length of the section is
-determined by BLOCK_SIZE. Once the iterations reach the end of
-rows, the next sub section of the first row is visited. No global
-memory access is done except for the first row.
-
-## v7
-
-Extends v5 with decomposition of the section computation. Parameter
-XS is used to specify the decomposition factor. For example, when BLOCK_SIZE
-is 64 and XS is 4, a continuous section of 128 items is computed
-in the four consecutive iterations. This is expected to improve
-memory access performance since it reduces strided accesses.
-
-## v9
-
-Extends v7 so that the problem size is not a multiple of the section
-length.
+This is basically a single work-item implementation of the NDRange code. It uses
+2D blocking, one dimension of which can be changed at run-time similar to the NDRange
+code. Since the computation exhibits a triangular/cone-like dependency pattern,
+blocks are overlapped by twice more columns than the height of the block (i.e.
+number of combined rows chosen at run-time). This results in a huge amount of redundancy,
+but is amortized by the very large block size. In contrast to the NDRange implementation,
+the on-chip buffer in the single work-item version is shift register which allows
+implementing much larger blocks with even lower Block RAM usage. Furthermore, this
+implementation achieves better operating frequency compared to the NDRange implementation;
+however, it performs around 30% slower, very likely due to memory access alignment problems
+which do not seem to affect NDRange kernels as much.

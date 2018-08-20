@@ -1,5 +1,3 @@
-#include "../common/opencl_kernel_common.h"
-
 //========================================================================================================================================================================================================200
 //	INCLUDE/DEFINE (had to bring from ./../main.h here because feature of including headers in clBuildProgram does not work for some reason)
 //========================================================================================================================================================================================================200
@@ -58,10 +56,10 @@ typedef struct box_str
 
 __kernel void kernel_gpu_opencl(fp                    alpha,
                                 long                  number_boxes,
-                       __global box_str*     RESTRICT d_box_gpu,
-                       __global FOUR_VECTOR* RESTRICT d_rv_gpu,
-                       __global fp*          RESTRICT d_qv_gpu,
-                       __global FOUR_VECTOR* RESTRICT d_fv_gpu)
+                       __global box_str*     restrict d_box_gpu,
+                       __global FOUR_VECTOR* restrict d_rv_gpu,
+                       __global fp*          restrict d_qv_gpu,
+                       __global FOUR_VECTOR* restrict d_fv_gpu)
 {
 
 	//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------180

@@ -3,7 +3,7 @@
 CC=gcc
 CXX=g++
 
-benchmarks=(nw hotspot pathfinder srad lud cfd)
+benchmarks=(nw hotspot hotspot3D pathfinder srad lud cfd)
 runs=5
 if [ "$#" -ne 1 ]
 then

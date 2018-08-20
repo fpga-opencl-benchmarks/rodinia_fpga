@@ -4,6 +4,7 @@
 #include "OpenCL_helper_library.h"
 
 #include "../common/opencl_util.h"
+#include "hotspot_common.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -32,8 +33,8 @@
 
 /* chip parameters	*/
 const static float t_chip = 0.0005;
-const static float chip_height = 0.016;
-const static float chip_width = 0.016;
+const static float chip_height = 1.6;
+const static float chip_width = 1.6;
 /* ambient temperature, assuming no package at all	*/
 const static float amb_temp = 80.0;
 
@@ -43,8 +44,13 @@ cl_command_queue command_queue;
 cl_command_queue command_queue2;
 cl_device_id device;
 cl_kernel kernel;
-cl_kernel kernel_even;
-cl_kernel kernel_odd;
+cl_kernel ReadKernel;
+cl_kernel WriteKernel;
+
+#ifdef EMULATOR
+cl_command_queue command_queue3;
+cl_kernel ComputeKernel;
+#endif
 
 void writeoutput(float *, int, int, char *);
 void readinput(float *, int, int, char *);

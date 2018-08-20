@@ -14,7 +14,7 @@
 #elif defined(RD_WG_SIZE)                                                        
         #define BLOCK_SIZE RD_WG_SIZE                                            
 #else                                                                                    
-        #define BLOCK_SIZE 16                                                            
+        #define BLOCK_SIZE 32                                                            
 #endif                                                                                   
 
 #define STR_SIZE 256
@@ -30,8 +30,8 @@
 
 /* chip parameters	*/
 float t_chip = 0.0005;
-float chip_height = 0.016;
-float chip_width = 0.016;
+float chip_height = 1.6;
+float chip_width = 1.6;
 /* ambient temperature, assuming no package at all	*/
 float amb_temp = 80.0;
 
@@ -126,16 +126,16 @@ __global__ void calculate_temp(int iteration,  //number of iteration
                                float step, 
                                float time_elapsed){
 	
-        __shared__ float temp_on_cuda[BLOCK_SIZE][BLOCK_SIZE];
-        __shared__ float power_on_cuda[BLOCK_SIZE][BLOCK_SIZE];
-        __shared__ float temp_t[BLOCK_SIZE][BLOCK_SIZE]; // saving temparary temperature result
+	__shared__ float temp_on_cuda[BLOCK_SIZE][BLOCK_SIZE];
+	__shared__ float power_on_cuda[BLOCK_SIZE][BLOCK_SIZE];
+	__shared__ float temp_t[BLOCK_SIZE][BLOCK_SIZE]; // saving temparary temperature result
 
 	float amb_temp = 80.0;
-        float step_div_Cap;
-        float Rx_1,Ry_1,Rz_1;
-        
+	float step_div_Cap;
+	float Rx_1,Ry_1,Rz_1;
+
 	int bx = blockIdx.x;
-        int by = blockIdx.y;
+	int by = blockIdx.y;
 
 	int tx=threadIdx.x;
 	int ty=threadIdx.y;
@@ -146,29 +146,29 @@ __global__ void calculate_temp(int iteration,  //number of iteration
 	Ry_1=1/Ry;
 	Rz_1=1/Rz;
 	
-        // each block finally computes result for a small block
-        // after N iterations. 
-        // it is the non-overlapping small blocks that cover 
-        // all the input data
+	// each block finally computes result for a small block
+	// after N iterations. 
+	// it is the non-overlapping small blocks that cover 
+	// all the input data
 
-        // calculate the small block size
+	// calculate the small block size
 	int small_block_rows = BLOCK_SIZE-iteration*2;//EXPAND_RATE
 	int small_block_cols = BLOCK_SIZE-iteration*2;//EXPAND_RATE
 
-        // calculate the boundary for the block according to 
-        // the boundary of its small block
-        int blkY = small_block_rows*by-border_rows;
-        int blkX = small_block_cols*bx-border_cols;
-        int blkYmax = blkY+BLOCK_SIZE-1;
-        int blkXmax = blkX+BLOCK_SIZE-1;
+	// calculate the boundary for the block according to 
+	// the boundary of its small block
+	int blkY = small_block_rows*by-border_rows;
+	int blkX = small_block_cols*bx-border_cols;
+	int blkYmax = blkY+BLOCK_SIZE-1;
+	int blkXmax = blkX+BLOCK_SIZE-1;
 
-        // calculate the global thread coordination
+	// calculate the global thread coordination
 	int yidx = blkY+ty;
 	int xidx = blkX+tx;
 
-        // load data if it is within the valid input range
+	// load data if it is within the valid input range
 	int loadYidx=yidx, loadXidx=xidx;
-        int index = grid_cols*loadYidx+loadXidx;
+	int index = grid_cols*loadYidx+loadXidx;
        
 	if(IN_RANGE(loadYidx, 0, grid_rows-1) && IN_RANGE(loadXidx, 0, grid_cols-1)){
             temp_on_cuda[ty][tx] = temp_src[index];  // Load the temperature data from global memory to shared memory
@@ -231,8 +231,8 @@ __global__ void calculate_temp(int iteration,  //number of iteration
 int compute_tran_temp(float *MatrixPower,float *MatrixTemp[2], int col, int row, \
 		int total_iterations, int num_iterations, int blockCols, int blockRows, int borderCols, int borderRows) 
 {
-        dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-        dim3 dimGrid(blockCols, blockRows);  
+	dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
+	dim3 dimGrid(blockCols, blockRows);  
 	
 	float grid_height = chip_height / row;
 	float grid_width = chip_width / col;
@@ -245,12 +245,12 @@ int compute_tran_temp(float *MatrixPower,float *MatrixTemp[2], int col, int row,
 	float max_slope = MAX_PD / (FACTOR_CHIP * t_chip * SPEC_HEAT_SI);
 	float step = PRECISION / max_slope;
 	float t;
-        float time_elapsed;
+	float time_elapsed;
 	time_elapsed=0.001;
 
-        int src = 1, dst = 0;
+	int src = 1, dst = 0;
 
-        cudaDeviceSynchronize();
+	cudaDeviceSynchronize();
 
 	#pragma omp parallel num_threads(2) shared(flag)
 	{
@@ -277,8 +277,8 @@ int compute_tran_temp(float *MatrixPower,float *MatrixTemp[2], int col, int row,
 	}
 	totalTime = TimeDiff(start, end);
 	energy = GetEnergyGPU(power, totalTime);
-        
-        return dst;
+
+	return dst;
 }
 
 void usage(int argc, char **argv)
@@ -295,23 +295,16 @@ void usage(int argc, char **argv)
 
 int main(int argc, char** argv)
 {
-  printf("WG size of kernel = %d X %d\n", BLOCK_SIZE, BLOCK_SIZE);
+	printf("WG size of kernel = %d X %d\n", BLOCK_SIZE, BLOCK_SIZE);
 
-    run(argc,argv);
-    
-    printf("\nComputation done in %0.3lf ms.\n", totalTime);
-    if (power != -1) // -1 --> failed to read energy values
-    {
-        printf("Total energy used is %0.3lf jouls.\n", energy);
-        printf("Average power consumption is %0.3lf watts.\n", power);
-    }
+	run(argc,argv);
 
-    return EXIT_SUCCESS;
+	return EXIT_SUCCESS;
 }
 
 void run(int argc, char** argv)
 {
-    int size;
+    int size, write_out = 0;
     int grid_rows,grid_cols;
     float *FilesavingTemp,*FilesavingPower,*MatrixOut; 
     char *tfile, *pfile, *ofile;
@@ -319,17 +312,21 @@ void run(int argc, char** argv)
     int total_iterations = 60;
     int pyramid_height = 1; // number of iterations
 	
-	if (argc != 7)
-		usage(argc, argv);
-	if((grid_rows = atoi(argv[1]))<=0||
-	   (grid_cols = atoi(argv[1]))<=0||
+    if (argc != 7 && argc != 6)
+        usage(argc, argv);
+    if((grid_rows = atoi(argv[1]))<=0||
+	  (grid_cols = atoi(argv[1]))<=0||
        (pyramid_height = atoi(argv[2]))<=0||
        (total_iterations = atoi(argv[3]))<=0)
-		usage(argc, argv);
-		
-	tfile=argv[4];
+        usage(argc, argv);
+
+    tfile=argv[4];
     pfile=argv[5];
-    ofile=argv[6];
+    if (argc == 7)
+    {
+        write_out = 1;
+        ofile=argv[6];
+    }
 	
     size=grid_rows*grid_cols;
 
@@ -350,8 +347,8 @@ void run(int argc, char** argv)
         fatal("unable to allocate memory");
 
     printf("pyramidHeight: %d\ngridSize: [%d, %d]\nborder:[%d, %d]\nblockGrid:[%d, %d]\ntargetBlock:[%d, %d]\n",\
-	pyramid_height, grid_cols, grid_rows, borderCols, borderRows, blockCols, blockRows, smallBlockCol, smallBlockRow);
-	
+    pyramid_height, grid_cols, grid_rows, borderCols, borderRows, blockCols, blockRows, smallBlockCol, smallBlockRow);
+
     readinput(FilesavingTemp, grid_rows, grid_cols, tfile);
     readinput(FilesavingPower, grid_rows, grid_cols, pfile);
 
@@ -367,15 +364,25 @@ void run(int argc, char** argv)
     cudaMemcpy(MatrixPower, FilesavingPower, sizeof(float)*size, cudaMemcpyHostToDevice);
     printf("Start computing the transient temperature\n");
     int ret = compute_tran_temp(MatrixPower,MatrixTemp,grid_cols,grid_rows, \
-	 total_iterations,pyramid_height, blockCols, blockRows, borderCols, borderRows);
-	printf("Ending simulation\n");
+    total_iterations,pyramid_height, blockCols, blockRows, borderCols, borderRows);
+    printf("Ending simulation\n");
     cudaMemcpy(MatrixOut, MatrixTemp[ret], sizeof(float)*size, cudaMemcpyDeviceToHost);
 
     TimeStamp end_time;
     GetTime(end_time);
     printf("Total time: %f ms\n", TimeDiff(start_time, end_time));
-    
-    writeoutput(MatrixOut,grid_rows, grid_cols, ofile);
+    printf("\nComputation done in %0.3lf ms.\n", totalTime);
+    printf("Throughput is %0.3lf GBps.\n", (3 * grid_rows * grid_cols * sizeof(float) * total_iterations) / (1000000000.0 * totalTime / 1000.0));
+    if (power != -1) // -1 --> failed to read energy values
+    {
+        printf("Total energy used is %0.3lf jouls.\n", energy);
+        printf("Average power consumption is %0.3lf watts.\n", power);
+    }
+
+    if (write_out)
+    {
+        writeoutput(MatrixOut,grid_rows, grid_cols, ofile);
+    }
 
     cudaFree(MatrixPower);
     cudaFree(MatrixTemp[0]);

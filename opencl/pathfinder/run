@@ -1,2 +1,2 @@
 version=$1
-./pathfinder 400000 1000 20 $version
+./pathfinder 1000000 1000 32 $version

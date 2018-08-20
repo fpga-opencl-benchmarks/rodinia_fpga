@@ -17,15 +17,17 @@
 #include <iostream>
 #include <fstream>
 #include "OpenCL.h"
+#include "pathfinder_common.h"
 
 #include "../common/opencl_util.h"
 #include "../../common/timer.h"
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+	#include "../../common/power_fpga.h"
+#endif
 
 using namespace std;
 
 #define HALO     1 // halo width along one direction when advancing to the next iteration
-#define BLOCK_SIZE 256
-#define STR_SIZE 256
 #define DEVICE   0
 #define M_SEED   9
 //#define BENCH_PRINT
@@ -41,18 +43,25 @@ int** wall;
 int*  result;
 int   pyramid_height;
 FILE *resultFile;
+char* ofile = NULL;
+bool write_out = 0;
 
 void init(int argc, char** argv)
 {
-	if (argc == 4)
+	if (argc == 4 || argc == 5)
 	{
 		cols = atoi(argv[1]);
 		rows = atoi(argv[2]);
 		pyramid_height = atoi(argv[3]);
+		if (argc == 5)
+		{
+			ofile = argv[4];
+			write_out = 1;
+		}			
 	}
 	else
 	{
-		printf("Usage: dynproc row_len col_len pyramid_height\n");
+		printf("Usage: %s row_len col_len pyramid_height output_file\n", argv[0]);
 		exit(0);
 	}
 	data = (int *)alignedMalloc( rows * cols * sizeof(int) );
@@ -98,32 +107,44 @@ int main(int argc, char** argv)
 {
 	int version;
 	TimeStamp kernelStart, kernelEnd;
-	
-	resultFile = fopen("result.txt", "w");
-	if (resultFile == NULL)
-	{
-		printf("Failed to open result file!\n");
-		exit(-1);
-	}
+	double computeTime;
+
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+	// power measurement parameters, only for Bittware and Nallatech's Arria 10 boards
+	int flag = 0;
+	double power = 0;
+	double energy = 0;
+#endif
+
 	init_fpga(&argc, &argv, &version);
 	init(argc, argv);
+
+	if (write_out)
+	{
+		resultFile = fopen(ofile, "w");
+		if (resultFile == NULL)
+		{
+			printf("Failed to open result file!\n");
+			exit(-1);
+		}
+	}
 	
 	// Pyramid parameters.
 	int borderCols = (pyramid_height) * HALO;
-	int smallBlockCol = BLOCK_SIZE - (pyramid_height) * HALO * 2;
+	int smallBlockCol = BSIZE - (pyramid_height) * HALO * 2;
 	int blockCols = cols / smallBlockCol + ((cols % smallBlockCol == 0) ? 0 : 1);
 
 	
-	fprintf(resultFile, "pyramidHeight: %d\ngridSize: [%d]\nborder:[%d]\nblockSize: %d\nblockGrid:[%d]\ntargetBlock:[%d]\n",
-		pyramid_height, cols, borderCols, BLOCK_SIZE, blockCols, smallBlockCol);
+	fprintf(stdout, "pyramidHeight: %d\ngridSize: [%d]\nborder:[%d]\nblockSize: %d\nblockGrid:[%d]\ntargetBlock:[%d]\n",
+		pyramid_height, cols, borderCols, BSIZE, blockCols, smallBlockCol);
 
 	int size = rows * cols;
 
 	// Create and initialize the OpenCL object.
 	OpenCL cl(1);  // 1 means to display output (debugging mode).
 	cl.init(version);
-	cl.gwSize(BLOCK_SIZE*blockCols);
-	cl.lwSize(BLOCK_SIZE);
+	cl.gwSize(BSIZE*blockCols);
+	cl.lwSize(BSIZE);
 
 	// Create and build the kernel.
 	string kn = "dynproc_kernel";  // the kernel name, for future use.
@@ -132,140 +153,191 @@ int main(int argc, char** argv)
 	// Allocate device memory.
 	cl_mem d_gpuWall;
 	cl_mem d_gpuResult[2];
-	if (is_ndrange_kernel(version))
+	cl_int error;
+	if (is_ndrange_kernel(version) || version == 5)
 	{
-		d_gpuWall      = clCreateBuffer(cl.ctxt(), CL_MEM_READ_ONLY , sizeof(cl_int)*(size-cols), NULL, NULL);
-		d_gpuResult[0] = clCreateBuffer(cl.ctxt(), CL_MEM_READ_WRITE, sizeof(cl_int)*cols       , NULL, NULL);
+		d_gpuWall      = clCreateBuffer(cl.ctxt(), CL_MEM_READ_ONLY , sizeof(cl_int)*(size-cols), NULL, &error);
+		if (error != CL_SUCCESS){ printf("Failed to allocate device buffer!\n"); exit(-1); }
+		d_gpuResult[0] = clCreateBuffer(cl.ctxt(), CL_MEM_READ_WRITE, sizeof(cl_int)*cols       , NULL, &error);
+		if (error != CL_SUCCESS){ printf("Failed to allocate device buffer!\n"); exit(-1); }
 
 		CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuWall     , CL_TRUE, 0, sizeof(cl_int)*(size-cols), data + cols, 0, NULL, NULL));
 		CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuResult[0], CL_TRUE, 0, sizeof(cl_int)*cols       , data       , 0, NULL, NULL));
 	}
 	else if (version <= 3)
 	{
-		d_gpuWall      = clCreateBuffer(cl.ctxt(), CL_MEM_READ_ONLY , sizeof(cl_int)*size, NULL, NULL);
-		d_gpuResult[0] = clCreateBuffer(cl.ctxt(), CL_MEM_READ_WRITE, sizeof(cl_int)*cols, NULL, NULL);
+		d_gpuWall      = clCreateBuffer(cl.ctxt(), CL_MEM_READ_ONLY , sizeof(cl_int)*size, NULL, &error);
+		if (error != CL_SUCCESS){ printf("Failed to allocate device buffer!\n"); exit(-1); }
+		d_gpuResult[0] = clCreateBuffer(cl.ctxt(), CL_MEM_READ_WRITE, sizeof(cl_int)*cols, NULL, &error);
+		if (error != CL_SUCCESS){ printf("Failed to allocate device buffer!\n"); exit(-1); }
 
 		CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuWall     , CL_TRUE, 0, sizeof(cl_int)*(size), data, 0, NULL, NULL));
 		CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuResult[0], CL_TRUE, 0, sizeof(cl_int)*cols  , data, 0, NULL, NULL));
 	}
-	else
-	{
-		d_gpuWall = clCreateBuffer(cl.ctxt(), CL_MEM_READ_ONLY, sizeof(cl_int)*size, NULL, NULL);
 
-		CL_SAFE_CALL(clEnqueueWriteBuffer(cl.command_queue, d_gpuWall, CL_TRUE, 0, sizeof(cl_int)*(size), data, 0, NULL, NULL));
-	}
-
-	d_gpuResult[1] = clCreateBuffer(cl.ctxt(), CL_MEM_READ_WRITE, sizeof(cl_int)*cols, NULL, NULL);
+	d_gpuResult[1] = clCreateBuffer(cl.ctxt(), CL_MEM_READ_WRITE, sizeof(cl_int)*cols, NULL, &error);
+	if (error != CL_SUCCESS){ printf("Failed to allocate device buffer!\n"); exit(-1); }
 
 	int src, dst;
-	if (is_ndrange_kernel(version))
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+	#pragma omp parallel num_threads(2) shared(flag)
 	{
-		src = 1;
-		dst = 0;
-
-		// Set fixed kernel arguments
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 0, sizeof(cl_int), (void*) &pyramid_height));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 1, sizeof(cl_mem), (void*) &d_gpuWall));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 4, sizeof(cl_int), (void*) &cols));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 5, sizeof(cl_int), (void*) &rows));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 7, sizeof(cl_int), (void*) &borderCols));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 8, sizeof(cl_int) * BLOCK_SIZE, 0));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 9, sizeof(cl_int) * BLOCK_SIZE, 0));
-
-		GetTime(kernelStart);
-		for (int startStep = 0; startStep < rows - 1; startStep += pyramid_height)
+		if (omp_get_thread_num() == 0)
 		{
-			int temp = src;
-			src = dst;
-			dst = temp;
+			#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115
+				power = GetPowerFPGA(&flag);
+			#else
+				power = GetPowerFPGA(&flag, cl.devices);
+			#endif
+		}
+		else
+		{
+			#pragma omp barrier
+#endif
+			if (is_ndrange_kernel(version))
+			{
+				src = 1;
+				dst = 0;
 
-			// Calculate changed kernel arguments...
-			CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 2, sizeof(cl_mem), (void*) &d_gpuResult[src]));
-			CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 3, sizeof(cl_mem), (void*) &d_gpuResult[dst]));
-			CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 6, sizeof(cl_int), (void*) &startStep));
-			
-			// Launch kernel
-			cl.launch(kn, version);
+				// Set fixed kernel arguments
+				CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 1, sizeof(cl_mem), (void*) &d_gpuWall));
+				CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 4, sizeof(cl_int), (void*) &cols));
+				CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 6, sizeof(cl_int), (void*) &borderCols));
+
+				GetTime(kernelStart);
+				for (int startStep = 0; startStep < rows - 1; startStep += pyramid_height)
+				{
+					int temp = src;
+					src = dst;
+					dst = temp;
+
+					// Calculate changed kernel arguments...
+					int iteration = MIN(pyramid_height, rows - startStep - 1);
+					CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 0, sizeof(cl_int), (void*) &iteration));
+					CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 2, sizeof(cl_mem), (void*) &d_gpuResult[src]));
+					CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 3, sizeof(cl_mem), (void*) &d_gpuResult[dst]));
+					CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 5, sizeof(cl_int), (void*) &startStep));
+					
+					// Launch kernel
+					cl.launch(kn, version);
+
+					clFinish(cl.command_queue);
+				}
+			}
+			else if (version <= 3)
+			{
+				src = 1;
+				dst = 0;
+
+				// Set fixed kernel arguments
+				CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 0, sizeof(cl_mem), (void*) &d_gpuWall));
+				CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 3, sizeof(cl_int), (void*) &cols));
+
+				GetTime(kernelStart);
+				for (int t = 0; t < rows - 1; t++)
+				{
+					int temp = src;
+					src = dst;
+					dst = temp;
+
+					// Calculate changed kernel arguments...
+					CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 1, sizeof(cl_mem), (void*) &d_gpuResult[src]));
+					CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 2, sizeof(cl_mem), (void*) &d_gpuResult[dst]));
+					CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 4, sizeof(cl_int), (void*) &t));
+					
+					// Launch kernel
+					cl.launch(kn, version);
+
+					clFinish(cl.command_queue);
+				}
+			}
+			else
+			{
+				src = 1;
+				dst = 0;
+
+				// Set kernel arguments
+				CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 0, sizeof(cl_mem), (void*) &d_gpuWall));
+				CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 3, sizeof(cl_int), (void*) &cols));
+
+				GetTime(kernelStart);
+
+				for (int startStep = 0; startStep < rows - 1; startStep += pyramid_height)
+				{
+					int temp = src;
+					src = dst;
+					dst = temp;
+
+					int rem_rows = MIN(pyramid_height, rows - startStep - 1);	// either equal to pyramid_height or the number of remaining iterations
+
+					// Exit condition should be a multiple of comp_bsize
+					int comp_bsize = BSIZE - 2 * rem_rows;
+					int last_col   = (cols % comp_bsize == 0) ? cols + 0 : cols + comp_bsize - cols % comp_bsize;
+					int col_blocks = last_col / comp_bsize;
+					int comp_exit  = BSIZE * col_blocks * (rem_rows + 1) / SSIZE;
+
+					CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 1, sizeof(cl_mem), (void*) &d_gpuResult[src]));
+					CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 2, sizeof(cl_mem), (void*) &d_gpuResult[dst]));
+					CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 4, sizeof(cl_int), (void*) &rem_rows));
+					CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 5, sizeof(cl_int), (void*) &startStep));
+					CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 6, sizeof(cl_int), (void*) &comp_exit));
+
+					// Launch kernel
+					cl.launch(kn, version);
+
+					clFinish(cl.command_queue);
+				}
+			}
+
+			clFinish(cl.command_queue);
+			GetTime(kernelEnd);
+
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+			flag = 1;
 		}
 	}
-	else if (version <= 3)
+#endif
+
+	// Copy results back to host.
+	clEnqueueReadBuffer(cl.q(), d_gpuResult[dst], CL_TRUE, 0, sizeof(cl_int)*cols, result, 0, NULL, NULL);
+
+	if (write_out)
 	{
-		src = 1;
-		dst = 0;
-
-		// Set fixed kernel arguments
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 0, sizeof(cl_mem), (void*) &d_gpuWall));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 3, sizeof(cl_int), (void*) &cols));
-
-		GetTime(kernelStart);
-		for (int t = 0; t < rows - 1; t++)
+		#ifdef BENCH_PRINT
+		for (int i = 0; i < cols; i++)
 		{
-			int temp = src;
-			src = dst;
-			dst = temp;
-
-			// Calculate changed kernel arguments...
-			CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 1, sizeof(cl_mem), (void*) &d_gpuResult[src]));
-			CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 2, sizeof(cl_mem), (void*) &d_gpuResult[dst]));
-			CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 4, sizeof(cl_int), (void*) &t));
-			
-			// Launch kernel
-			cl.launch(kn, version);
+			fprintf(resultFile, "%d ", data[i]) ;
 		}
+		fprintf(resultFile, "\n") ;
+		#endif
+
+		for (int i = 0; i < cols; i++)
+		{
+			fprintf(resultFile, "%d\n", result[i]) ;
+		}
+		fclose(resultFile);
+	}
+
+	computeTime = TimeDiff(kernelStart, kernelEnd);
+	printf("\nComputation done in %0.3lf ms.\n", computeTime);
+
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+	energy = GetEnergyFPGA(power, computeTime);
+	if (power != -1) // -1 --> sensor read failure
+	{
+		printf("Total energy used is %0.3lf jouls.\n", energy);
+		printf("Average power consumption is %0.3lf watts.\n", power);
 	}
 	else
 	{
-		dst = 1;
-
-		// Set kernel arguments.
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 0, sizeof(cl_mem), (void*) &d_gpuWall));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 1, sizeof(cl_mem), (void*) &d_gpuResult[dst]));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 2, sizeof(cl_int), (void*) &cols));
-		CL_SAFE_CALL(clSetKernelArg(cl.kernel(kn), 3, sizeof(cl_int), (void*) &rows));
-
-		GetTime(kernelStart);
-
-		// Launch kernel
-		cl.launch(kn, version);
+		printf("Failed to read power values from the sensor!\n");
 	}
-
-	clFinish(cl.command_queue);
-	GetTime(kernelEnd);
-
-	// Copy results back to host.
-	clEnqueueReadBuffer(cl.q(),                   // The command queue.
-	                    d_gpuResult[dst],         // The result on the device.
-	                    CL_TRUE,                  // Blocking? (ie. Wait at this line until read has finished?)
-	                    0,                        // Offset. None in this case.
-	                    sizeof(cl_int)*cols,      // Size to copy.
-	                    result,                   // The pointer to the memory on the host.
-	                    0,                        // Number of events in wait list. Not used.
-	                    NULL,                     // Event wait list. Not used.
-	                    NULL);                    // Event object for determining status. Not used.
-	
-#ifdef BENCH_PRINT
-
-	for (int i = 0; i < cols; i++)
-	{
-		fprintf(resultFile, "%d ",data[i]) ;
-	}
-	fprintf(resultFile, "\n") ;
-
 #endif
-
-	for (int i = 0; i < cols; i++)
-	{
-		fprintf(resultFile, "%d ",result[i]) ;
-	}
-	fprintf(resultFile, "\n") ;
-
-	printf("\nComputation done in %0.3lf ms.\n", TimeDiff(kernelStart, kernelEnd));
 
 	// Memory cleanup here.
 	free(data);
 	free(wall);
 	free(result);
-	fclose(resultFile);
 
 	return EXIT_SUCCESS;
 }

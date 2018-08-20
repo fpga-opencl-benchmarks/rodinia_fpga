@@ -9,8 +9,23 @@ else
 	EXE = $(MAIN)
 endif
 
+ifdef BSIZE
+	CXXFLAGS += -DBSIZE=$(BSIZE)
+endif
+
+ifdef PAR
+	CXXFLAGS += -DPAR=$(PAR)
+endif
+
+ifdef NO_INTERLEAVE
+	CXXFLAGS += -DNO_INTERLEAVE
+endif
+
 all: $(MAIN).c 
 	$(CXX) ${KERNEL_DIM} $(CXXFLAGS) $(MAIN).c $(OPENCL_INC) $(OPENCL_LIB) -o $(EXE)
+	
+verify: $(MAIN).c 
+	$(CXX) ${KERNEL_DIM} $(CXXFLAGS) $(MAIN).c $(OPENCL_INC) $(OPENCL_LIB) -o $(EXE) -DVERIFY
 
 trace: $(MAIN).c
 	$(CXX) ${KERNEL_DIM} $(CXXFLAGS) $(MAIN).c $(OPENCL_INC) $(OPENCL_LIB) -o $(EXE) -DTRACEBACK
@@ -72,8 +87,5 @@ endif
 
 endif # ifdef ALTERA
 
-clean: cleandir
-	$(RM) $(EXE) *.aoco *.aocx
-
-cleandir:
-	find .  -maxdepth 1 -name "$(KERNEL)_v[0-9]*" -type d | xargs rm -rf
+clean:
+	$(RM) $(EXE) *.aoco

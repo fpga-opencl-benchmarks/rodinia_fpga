@@ -24,7 +24,7 @@
 
 #define KERNEL_PREFIX "./euler3d_kernel"
 
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
 	#include "../../common/power_fpga.h"
 #endif
 
@@ -115,8 +115,8 @@ int main(int argc, char** argv){
   init_fpga2(&argc, &argv, &vs, &version_number);
   version_string = std::string(vs);
   
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-  // power measurement parameters, only for Bittware's A10PL4 board
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+  // power measurement parameters, only for Bittware and Nallatech's Arria 10 boards
   int flag = 0;
   double power = 0;
   double energy = 0;
@@ -288,12 +288,16 @@ int main(int argc, char** argv){
   // these need to be computed the first time in order to compute time step
   std::cout << "Starting..." << std::endl;
 
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
   #pragma omp parallel num_threads(2) shared(flag)
   {
     if (omp_get_thread_num() == 0)
     {
-      power = GetPowerFPGA(&flag);
+      #ifdef AOCL_BOARD_a10pl4_dd4gb_gx115
+        power = GetPowerFPGA(&flag);
+      #else
+        power = GetPowerFPGA(&flag, device_list);
+      #endif
     }
     else
     {
@@ -335,7 +339,7 @@ int main(int argc, char** argv){
       _clFinish();
       GetTime(end);
 
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
       flag = 1;
     }
   }
@@ -354,7 +358,7 @@ int main(int argc, char** argv){
   double computeTime = TimeDiff(start, end);
   printf("Computation done in %0.3lf ms.\n", computeTime);
 
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
   energy = GetEnergyFPGA(power, computeTime);
   if (power != -1) // -1 --> sensor read failure
   {

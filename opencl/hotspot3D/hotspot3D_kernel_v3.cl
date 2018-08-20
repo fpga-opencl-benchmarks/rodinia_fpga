@@ -1,13 +1,13 @@
-#include "../common/opencl_kernel_common.h"
+#include "hotspot3D_common.h"
 
-#ifndef UNROLL
-	#define UNROLL 4
+#ifndef SSIZE
+	#define SSIZE 4
 #endif
 
 __attribute__((max_global_work_dim(0)))
-__kernel void hotspotOpt1(__global float* RESTRICT pIn,
-                          __global float* RESTRICT tIn,
-                          __global float* RESTRICT tOut,
+__kernel void hotspotOpt1(__global float* restrict pIn,
+                          __global float* restrict tIn,
+                          __global float* restrict tOut,
                                    float           sdc,
                                    int             nx,
                                    int             ny,
@@ -20,25 +20,24 @@ __kernel void hotspotOpt1(__global float* RESTRICT pIn,
                                    float           cb, 
                                    float           cc)
 {
-	float amb_temp = 80.0;
-
 	for(int z = 0; z < nz; z++)
 	{
 		for(int y = 0; y < ny; y++)
 		{
-			#pragma unroll UNROLL
+			#pragma unroll SSIZE
 			for(int x = 0; x < nx; x++)
 			{
-				int c = x + y * nx + z * nx * ny;
+				int index = x + y * nx + z * nx * ny;
+				float c = tIn[index];
 
-				int w = (x == 0) ? c : c - 1;
-				int e = (x == nx - 1) ? c : c + 1;
-				int n = (y == 0) ? c : c - nx;
-				int s = (y == ny - 1) ? c : c + nx;
-				int b = (z == 0) ? c : c - nx * ny;
-				int t = (z == nz - 1) ? c : c + nx * ny;
+				float w = (x == 0)      ? c : tIn[index - 1];
+				float e = (x == nx - 1) ? c : tIn[index + 1];
+				float n = (y == 0)      ? c : tIn[index - nx];
+				float s = (y == ny - 1) ? c : tIn[index + nx];
+				float b = (z == 0)      ? c : tIn[index - nx * ny];
+				float t = (z == nz - 1) ? c : tIn[index + nx * ny];
 
-				tOut[c] = tIn[c]*cc + tIn[n]*cn + tIn[s]*cs + tIn[e]*ce + tIn[w]*cw + tIn[t]*ct + tIn[b]*cb + sdc * pIn[c] + ct*amb_temp;
+				tOut[index] = c * cc + n * cn + s * cs + e * ce + w * cw + t * ct + b * cb + sdc * pIn[index] + ct * AMB_TEMP;
 			}
 		}
 	}

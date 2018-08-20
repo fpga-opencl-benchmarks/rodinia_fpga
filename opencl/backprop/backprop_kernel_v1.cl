@@ -1,4 +1,3 @@
-#include "../common/opencl_kernel_common.h"
 #define ABS(x)          (((x) > 0.0) ? (x) : (-(x)))
 #define ETA             0.3  //eta value
 #define MOMENTUM        0.3  //momentum value
@@ -8,9 +7,9 @@ inline float squash(float x)
   return (1.0 / (1.0 + exp(-x)));
 }
 
-__kernel void bpnn_layerforward(__global float* RESTRICT l1,
-                                __global float* RESTRICT l2,
-                                __global float* RESTRICT conn,
+__kernel void bpnn_layerforward(__global float* restrict l1,
+                                __global float* restrict l2,
+                                __global float* restrict conn,
                                          int             n1,
                                          int             n2)
 {
@@ -33,11 +32,11 @@ __kernel void bpnn_layerforward(__global float* RESTRICT l1,
 	}
 }
 
-__kernel void bpnn_output_error(__global float* RESTRICT delta,
-                                __global float* RESTRICT target,
-                                __global float* RESTRICT output,
+__kernel void bpnn_output_error(__global float* restrict delta,
+                                __global float* restrict target,
+                                __global float* restrict output,
                                          int             nj,
-                                __global float* RESTRICT err)
+                                __global float* restrict err)
 {
 	int j;
 	float o, t, errsum;
@@ -52,13 +51,13 @@ __kernel void bpnn_output_error(__global float* RESTRICT delta,
 	err[0] = errsum;
 }
 
-__kernel void bpnn_hidden_error(__global float* RESTRICT delta_h,   
+__kernel void bpnn_hidden_error(__global float* restrict delta_h,   
                                          int             nh, 
-                                __global float* RESTRICT delta_o, 
+                                __global float* restrict delta_o, 
                                          int             no, 
-                                __global float* RESTRICT who, 
-                                __global float* RESTRICT hidden, 
-                                __global float* RESTRICT err)
+                                __global float* restrict who, 
+                                __global float* restrict hidden, 
+                                __global float* restrict err)
 {
 	int j, k;
 	float h, sum, errsum;
@@ -78,12 +77,12 @@ __kernel void bpnn_hidden_error(__global float* RESTRICT delta_h,
 	err[0] = errsum;
 }
 
-__kernel void bpnn_adjust_weights(__global float* RESTRICT delta,
+__kernel void bpnn_adjust_weights(__global float* restrict delta,
                                            int             ndelta,
-                                  __global float* RESTRICT ly,
+                                  __global float* restrict ly,
                                            int             nly,
-                                  __global float* RESTRICT w,
-                                  __global float* RESTRICT oldw)
+                                  __global float* restrict w,
+                                  __global float* restrict oldw)
 {
 	float new_dw;
 	int k, j;

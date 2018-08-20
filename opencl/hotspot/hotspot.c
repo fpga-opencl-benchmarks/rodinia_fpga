@@ -1,11 +1,11 @@
-#include "hotspot_common.h"
 #include "hotspot.h"
 #include "../../common/timer.h"
-#include "../common/opencl_timer.h"
 
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-	#include "../../common/power_fpga.h"
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+     #include "../../common/power_fpga.h"
 #endif
+
+cl_device_id *device_list;
 
 void writeoutput(float *vect, int grid_rows, int grid_cols, char *file) {
 
@@ -32,7 +32,6 @@ void writeoutput(float *vect, int grid_rows, int grid_cols, char *file) {
   }
 }
 
-
 void readinput(float *vect, int grid_rows, int grid_cols, char *file) {
 
   int i,j;
@@ -58,19 +57,17 @@ void readinput(float *vect, int grid_rows, int grid_cols, char *file) {
       vect[i*grid_cols+j] = val;
     }
 
-  fclose(fp);	
+  fclose(fp);  
 
 }
-
 
 /*
   compute N time steps
 */
 
 int compute_tran_temp(cl_mem MatrixPower, cl_mem MatrixTemp[2], int col, int row, \
-                      int total_iterations, int num_iterations, int blockCols, int blockRows, int borderCols, int borderRows,
-                      float *TempCPU, float *PowerCPU, int version_number,
-                      int block_size) 
+                      int total_iterations, int pyramid_height, int blockCols, int blockRows, int haloCols, int haloRows,
+                      int version_number, int block_size_x, int block_size_y) 
 {
   float grid_height = chip_height / row;
   float grid_width = chip_width / col;
@@ -88,97 +85,123 @@ int compute_tran_temp(cl_mem MatrixPower, cl_mem MatrixTemp[2], int col, int row
   TimeStamp compute_start, compute_end;
   double computeTime;
   
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-  // power measurement parameters, only for Bittware's A10PL4 board
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+  // power measurement parameters, only for Bittware and Nallatech's Arria 10 boards
   int flag = 0;
   double power = 0;
   double energy = 0;
 #endif
-  
-  cl_mem boundary; // for v11
-  
-  if (version_number >= 11)
-  {
-    cl_int error;
-    boundary = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row * 4, NULL, &error);	// to store necessary boundary data for two blocks, two columns per block
-    if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
-  }
 
   CL_SAFE_CALL(clFinish(command_queue));
 
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
   #pragma omp parallel num_threads(2) shared(flag)
   {
     if (omp_get_thread_num() == 0)
     {
-      power = GetPowerFPGA(&flag);
+      #ifdef AOCL_BOARD_a10pl4_dd4gb_gx115
+        power = GetPowerFPGA(&flag);
+      #else
+        power = GetPowerFPGA(&flag, device_list);
+      #endif
     }
     else
     {
       #pragma omp barrier
 #endif
-      // beginning of timing point
-      GetTime(compute_start);
-
       if (is_ndrange_kernel(version_number))
       {
         // Determine GPU work group grid
         size_t global_work_size[2];
-        global_work_size[0] = block_size * blockCols;
-        global_work_size[1] = block_size * blockRows;
+        global_work_size[0] = block_size_x * blockCols;
+        global_work_size[1] = block_size_y * blockRows;
         size_t local_work_size[2];
-        local_work_size[0] = block_size;
-        local_work_size[1] = block_size;
+        local_work_size[0] = block_size_x;
+        local_work_size[1] = block_size_y;
 
-        if (version_number == 4)
+        if (version_number == 2)
         {
           float step_div_Cap=step/Cap;
           float Rx_1=1/Rx;
           float Ry_1=1/Ry;
           float Rz_1=1/Rz;
 
-          clSetKernelArg(kernel, 0 , sizeof(cl_mem), (void *) &MatrixPower);
-          clSetKernelArg(kernel, 3 , sizeof(int)   , (void *) &col);
-          clSetKernelArg(kernel, 4 , sizeof(int)   , (void *) &row);
-          clSetKernelArg(kernel, 5 , sizeof(float) , (void *) &step_div_Cap);
-          clSetKernelArg(kernel, 6 , sizeof(float) , (void *) &Rx_1);
-          clSetKernelArg(kernel, 7 , sizeof(float) , (void *) &Ry_1);
-          clSetKernelArg(kernel, 8 , sizeof(float) , (void *) &Rz_1);
+          CL_SAFE_CALL(clSetKernelArg(kernel, 1 , sizeof(cl_mem), (void *) &MatrixPower ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 4 , sizeof(int)   , (void *) &col         ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 5 , sizeof(int)   , (void *) &row         ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 6 , sizeof(int)   , (void *) &haloCols  ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 7 , sizeof(int)   , (void *) &haloRows  ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 8 , sizeof(float) , (void *) &step_div_Cap));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 9 , sizeof(float) , (void *) &Rx_1        ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 10, sizeof(float) , (void *) &Ry_1        ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 11, sizeof(float) , (void *) &Rz_1        ));
+        }
+        else if (version_number == 4)
+        {
+          float step_div_Cap=step/Cap;
+          float Rx_1=1/Rx;
+          float Ry_1=1/Ry;
+          float Rz_1=1/Rz;
+
+          CL_SAFE_CALL(clSetKernelArg(kernel, 1 , sizeof(cl_mem), (void *) &MatrixPower    ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 4 , sizeof(int)   , (void *) &col            ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 5 , sizeof(int)   , (void *) &row            ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 6 , sizeof(int)   , (void *) &pyramid_height ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 7 , sizeof(float) , (void *) &step_div_Cap   ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 8 , sizeof(float) , (void *) &Rx_1           ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 9 , sizeof(float) , (void *) &Ry_1           ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 10, sizeof(float) , (void *) &Rz_1           ));
         }
         else
         {
-          clSetKernelArg(kernel, 1 , sizeof(cl_mem), (void *) &MatrixPower);
-          clSetKernelArg(kernel, 4 , sizeof(int)   , (void *) &col);
-          clSetKernelArg(kernel, 5 , sizeof(int)   , (void *) &row);
-          clSetKernelArg(kernel, 6 , sizeof(int)   , (void *) &borderCols);
-          clSetKernelArg(kernel, 7 , sizeof(int)   , (void *) &borderRows);
-          clSetKernelArg(kernel, 8 , sizeof(float) , (void *) &Cap);
-          clSetKernelArg(kernel, 9 , sizeof(float) , (void *) &Rx);
-          clSetKernelArg(kernel, 10, sizeof(float) , (void *) &Ry);
-          clSetKernelArg(kernel, 11, sizeof(float) , (void *) &Rz);
-          clSetKernelArg(kernel, 12, sizeof(float) , (void *) &step);
+          CL_SAFE_CALL(clSetKernelArg(kernel, 1 , sizeof(cl_mem), (void *) &MatrixPower ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 4 , sizeof(int)   , (void *) &col         ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 5 , sizeof(int)   , (void *) &row         ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 6 , sizeof(int)   , (void *) &haloCols    ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 7 , sizeof(int)   , (void *) &haloRows    ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 8 , sizeof(float) , (void *) &Cap         ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 9 , sizeof(float) , (void *) &Rx          ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 10, sizeof(float) , (void *) &Ry          ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 11, sizeof(float) , (void *) &Rz          ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 12, sizeof(float) , (void *) &step        ));
         }
 
-        int t;
-        for (t = 0; t < total_iterations; t += num_iterations)
-        {
-          int iter = MIN(num_iterations, total_iterations - t);
+        // Beginning of timing point
+        GetTime(compute_start);
 
-          if (version_number == 4)
+        // Launch kernel
+        int t;
+        for (t = 0; t < total_iterations; t += pyramid_height)
+        {
+          int iter = MIN(pyramid_height, total_iterations - t);
+          
+          // each block finally computes result for a small block
+          // after N iterations. 
+          // it is the non-overlapping small blocks that cover 
+          // all the input data
+
+          // calculate the small block size
+          int small_block_cols = BLOCK_X - iter * 2; //EXPAND_RATE
+          int small_block_rows = BLOCK_Y - iter * 2; //EXPAND_RATE
+
+          CL_SAFE_CALL(clSetKernelArg(kernel, 0 , sizeof(int)   , (void *) &iter           ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 2 , sizeof(cl_mem), (void *) &MatrixTemp[src]));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 3 , sizeof(cl_mem), (void *) &MatrixTemp[dst]));
+          if (version_number == 2)
           {
-            clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *) &MatrixTemp[src]);
-            clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *) &MatrixTemp[dst]);
+               CL_SAFE_CALL(clSetKernelArg(kernel, 12, sizeof(int), (void *) &small_block_rows));
+               CL_SAFE_CALL(clSetKernelArg(kernel, 13, sizeof(int), (void *) &small_block_cols));
           }
-          else
+          else if (version_number == 4)
           {
-            clSetKernelArg(kernel, 0, sizeof(int), (void *) &iter);
-            clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *) &MatrixTemp[src]);
-            clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *) &MatrixTemp[dst]);
+               CL_SAFE_CALL(clSetKernelArg(kernel, 11, sizeof(int), (void *) &small_block_rows));
+               CL_SAFE_CALL(clSetKernelArg(kernel, 12, sizeof(int), (void *) &small_block_cols));
           }
 
           // Launch kernel
-          cl_int error = clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL);
-          if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
+          CL_SAFE_CALL( clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL) );
+
+          clFinish(command_queue);
 
           src = 1 - src;
           dst = 1 - dst;
@@ -188,61 +211,108 @@ int compute_tran_temp(cl_mem MatrixPower, cl_mem MatrixTemp[2], int col, int row
       {
         // Using the single work-item versions.
         // All iterations are computed by a single kernel execution.
-        // borderCols and borderRows are not used in these versions, so
+        // haloCols and haloRows are not used in these versions, so
         // they are not passed.
-        if (version_number >= 11)
+        if (version_number >= 7)
+        {
+          // Exit condition should be a multiple of comp_bsize
+          int comp_bsize = BLOCK_X - BACK_OFF;
+          int last_col   = (col % comp_bsize == 0) ? col + 0 : col + comp_bsize - col % comp_bsize;
+          int col_blocks = last_col / comp_bsize;
+          int comp_exit  = BLOCK_X * col_blocks * (row + 1) / SSIZE;
+          int mem_exit   = BLOCK_X * col_blocks * row / SSIZE;
+
+          float step_div_Cap=step/Cap;
+          float Rx_1=1/Rx;
+          float Ry_1=1/Ry;
+          float Rz_1=1/Rz;
+
+          CL_SAFE_CALL(clSetKernelArg(ReadKernel, 1, sizeof(cl_mem), (void *) &MatrixPower ));
+          CL_SAFE_CALL(clSetKernelArg(ReadKernel, 2, sizeof(int)   , (void *) &col         ));
+          CL_SAFE_CALL(clSetKernelArg(ReadKernel, 3, sizeof(int)   , (void *) &row         ));
+          CL_SAFE_CALL(clSetKernelArg(ReadKernel, 4, sizeof(float) , (void *) &step_div_Cap));
+          CL_SAFE_CALL(clSetKernelArg(ReadKernel, 5, sizeof(float) , (void *) &Rx_1        ));
+          CL_SAFE_CALL(clSetKernelArg(ReadKernel, 6, sizeof(float) , (void *) &Ry_1        ));
+          CL_SAFE_CALL(clSetKernelArg(ReadKernel, 7, sizeof(float) , (void *) &Rz_1        ));
+          CL_SAFE_CALL(clSetKernelArg(ReadKernel, 8, sizeof(float) , (void *) &comp_exit   ));
+          CL_SAFE_CALL(clSetKernelArg(ReadKernel, 9, sizeof(float) , (void *) &mem_exit    ));
+
+          CL_SAFE_CALL(clSetKernelArg(WriteKernel, 1, sizeof(int)  , (void *) &col         ));
+          CL_SAFE_CALL(clSetKernelArg(WriteKernel, 2, sizeof(int)  , (void *) &row         ));
+          CL_SAFE_CALL(clSetKernelArg(WriteKernel, 3, sizeof(float), (void *) &mem_exit    ));
+        }
+        else if (version_number == 5)
+        {
+          // Exit condition should be a multiple of comp_bsize
+          int comp_bsize = BLOCK_X - 2;
+          int last_col   = (col % comp_bsize == 0) ? col + 0 : col + comp_bsize - col % comp_bsize;
+          int col_blocks = last_col / comp_bsize;
+          int comp_exit  = BLOCK_X * col_blocks * (row + 1) / SSIZE;
+
+          float step_div_Cap=step/Cap;
+          float Rx_1=1/Rx;
+          float Ry_1=1/Ry;
+          float Rz_1=1/Rz;
+
+          CL_SAFE_CALL(clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *) &MatrixPower ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 3, sizeof(int)   , (void *) &col         ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 4, sizeof(int)   , (void *) &row         ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 5, sizeof(float) , (void *) &step_div_Cap));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 6, sizeof(float) , (void *) &Rx_1        ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 7, sizeof(float) , (void *) &Ry_1        ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 8, sizeof(float) , (void *) &Rz_1        ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 9, sizeof(float) , (void *) &comp_exit   ));
+        }
+        else if (version_number == 3)
         {
           float step_div_Cap=step/Cap;
           float Rx_1=1/Rx;
           float Ry_1=1/Ry;
           float Rz_1=1/Rz;
 
-          clSetKernelArg(kernel_even, 0, sizeof(cl_mem), (void *) &MatrixPower);
-          clSetKernelArg(kernel_even, 2, sizeof(int)   , (void *) &col);
-          clSetKernelArg(kernel_even, 3, sizeof(int)   , (void *) &row);
-          clSetKernelArg(kernel_even, 4, sizeof(float) , (void *) &step_div_Cap);
-          clSetKernelArg(kernel_even, 5, sizeof(float) , (void *) &Rx_1);
-          clSetKernelArg(kernel_even, 6, sizeof(float) , (void *) &Ry_1);
-          clSetKernelArg(kernel_even, 7, sizeof(float) , (void *) &Rz_1);
-          clSetKernelArg(kernel_even, 8, sizeof(cl_mem), (void *) &boundary);
-
-          clSetKernelArg(kernel_odd , 0, sizeof(cl_mem), (void *) &MatrixPower);
-          clSetKernelArg(kernel_odd , 2, sizeof(int)   , (void *) &col);
-          clSetKernelArg(kernel_odd , 3, sizeof(int)   , (void *) &row);
-          clSetKernelArg(kernel_odd , 4, sizeof(float) , (void *) &step_div_Cap);
-          clSetKernelArg(kernel_odd , 5, sizeof(float) , (void *) &Rx_1);
-          clSetKernelArg(kernel_odd , 6, sizeof(float) , (void *) &Ry_1);
-          clSetKernelArg(kernel_odd , 7, sizeof(float) , (void *) &Rz_1);
-          clSetKernelArg(kernel_odd , 8, sizeof(cl_mem), (void *) &boundary);
+          CL_SAFE_CALL(clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *) &MatrixPower ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 3, sizeof(int)   , (void *) &col         ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 4, sizeof(int)   , (void *) &row         ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 5, sizeof(float) , (void *) &step_div_Cap));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 6, sizeof(float) , (void *) &Rx_1        ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 7, sizeof(float) , (void *) &Ry_1        ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 8, sizeof(float) , (void *) &Rz_1        ));
         }
         else
         {
-          clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *) &MatrixPower);
-          clSetKernelArg(kernel, 3, sizeof(int),    (void *) &col);
-          clSetKernelArg(kernel, 4, sizeof(int),    (void *) &row);
-          clSetKernelArg(kernel, 5, sizeof(float),  (void *) &Cap);
-          clSetKernelArg(kernel, 6, sizeof(float),  (void *) &Rx);
-          clSetKernelArg(kernel, 7, sizeof(float),  (void *) &Ry);
-          clSetKernelArg(kernel, 8, sizeof(float),  (void *) &Rz);
-          clSetKernelArg(kernel, 9, sizeof(float),  (void *) &step);
+          CL_SAFE_CALL(clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *) &MatrixPower ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 3, sizeof(int)   , (void *) &col         ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 4, sizeof(int)   , (void *) &row         ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 5, sizeof(float) , (void *) &Cap         ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 6, sizeof(float) , (void *) &Rx          ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 7, sizeof(float) , (void *) &Ry          ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 8, sizeof(float) , (void *) &Rz          ));
+          CL_SAFE_CALL(clSetKernelArg(kernel, 9, sizeof(float) , (void *) &step        ));
         }
+
+        // Beginning of timing point
+        GetTime(compute_start);
 
         // Launch kernel
         int t;
-        if (version_number >= 11)
+        if (version_number >= 7)
         {
-          for (t = 0; t < total_iterations; t += 2) // in this version two iterations are launched simultaneously, hence total iteration number is halved
+          for (t = 0; t < total_iterations; t = t + TIME) // in this version two iterations are launched simultaneously, hence total iteration number is halved
           {
-            int rem_iter = total_iterations-t;
-            clSetKernelArg(kernel_even, 1, sizeof(cl_mem), (void *) &MatrixTemp[src]);
-            clSetKernelArg(kernel_odd , 1, sizeof(cl_mem), (void *) &MatrixTemp[dst]);
+            CL_SAFE_CALL(clSetKernelArg(ReadKernel , 0, sizeof(cl_mem), (void *) &MatrixTemp[src]));
+            CL_SAFE_CALL(clSetKernelArg(WriteKernel, 0, sizeof(cl_mem), (void *) &MatrixTemp[dst]));
 
-            // pass number of remaining iterations to correctly handle cases where number of iterations is an odd number
-            clSetKernelArg(kernel_even, 9, sizeof(int)   , (void *) &rem_iter);
-            clSetKernelArg(kernel_odd , 9, sizeof(int)   , (void *) &rem_iter);
+            // the following variable is used to choose which time step should send its output to the write kernel
+            // unless there are less iterations left than there are parallel time steps, the last time step will do so
+            int rem_iter = (total_iterations - t > TIME) ? TIME : total_iterations - t;
+            CL_SAFE_CALL(clSetKernelArg(ReadKernel, 10, sizeof(float) , (void *) &rem_iter));
 
-            CL_SAFE_CALL(clEnqueueTask(command_queue , kernel_even, 0, NULL, NULL));
-            CL_SAFE_CALL(clEnqueueTask(command_queue2, kernel_odd , 0, NULL, NULL));
+            CL_SAFE_CALL(clEnqueueTask(command_queue , ReadKernel   , 0, NULL, NULL));
+
+            CL_SAFE_CALL(clEnqueueTask(command_queue2, WriteKernel  , 0, NULL, NULL));
+#ifdef EMULATOR
+            CL_SAFE_CALL(clEnqueueTask(command_queue3, ComputeKernel, 0, NULL, NULL));
+#endif
 
             clFinish(command_queue2); // this is necessary since the two kernels are running in two different queue and a new iteration should not start before the previous one finishes
 
@@ -254,9 +324,12 @@ int compute_tran_temp(cl_mem MatrixPower, cl_mem MatrixTemp[2], int col, int row
         {
           for (t = 0; t < total_iterations; ++t)
           {
-            clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *) &MatrixTemp[src]);
-            clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *) &MatrixTemp[dst]);
+            CL_SAFE_CALL(clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *) &MatrixTemp[src]));
+            CL_SAFE_CALL(clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *) &MatrixTemp[dst]));
             CL_SAFE_CALL(clEnqueueTask(command_queue, kernel, 0, NULL, NULL));
+
+            clFinish(command_queue);
+
             src = 1 - src;
             dst = 1 - dst;
           }
@@ -264,11 +337,11 @@ int compute_tran_temp(cl_mem MatrixPower, cl_mem MatrixTemp[2], int col, int row
       }
 
       // Wait for all operations to finish
-      CL_SAFE_CALL(clFinish(command_queue));
+      clFinish(command_queue);
 
       GetTime(compute_end);
       
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
       flag = 1;
     }
   }
@@ -276,8 +349,9 @@ int compute_tran_temp(cl_mem MatrixPower, cl_mem MatrixTemp[2], int col, int row
 
   computeTime = TimeDiff(compute_start, compute_end);
   printf("\nComputation done in %0.3lf ms.\n", computeTime);
+  printf("Throughput is %0.3lf GBps.\n", (3 * row * col * sizeof(float) * total_iterations) / (1000000000.0 * computeTime / 1000.0));
 
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
   energy = GetEnergyFPGA(power, computeTime);
   if (power != -1) // -1 --> sensor read failure
   {
@@ -289,31 +363,46 @@ int compute_tran_temp(cl_mem MatrixPower, cl_mem MatrixTemp[2], int col, int row
     printf("Failed to read power values from the sensor!\n");
   }
 #endif
-  
-  if (version_number >= 11)
-  {
-    clReleaseMemObject(boundary);
-  }
 
   return src;
 }
 
 void usage(int argc, char **argv) {
-  fprintf(stderr, "Usage: %s <grid_rows/grid_cols> <pyramid_height> <sim_time> <temp_file> <power_file> <output_file> <block_size>\n", argv[0]);
+  fprintf(stderr, "Usage: %s <grid_rows/grid_cols> <pyramid_height> <sim_time> <temp_file> <power_file> <output_file>\n", argv[0]);
   fprintf(stderr, "\t<grid_rows/grid_cols>  - number of rows/cols in the grid (positive integer)\n");
-  fprintf(stderr, "\t<pyramid_height> - pyramid heigh(positive integer)\n");
+  fprintf(stderr, "\t<pyramid_height> - pyramid height(positive integer)\n");
   fprintf(stderr, "\t<sim_time>   - number of iterations\n");
   fprintf(stderr, "\t<temp_file>  - name of the file containing the initial temperature values of each cell\n");
   fprintf(stderr, "\t<power_file> - name of the file containing the dissipated power values of each cell\n");
-  fprintf(stderr, "\t<output_file> - name of the output file\n");
-  fprintf(stderr, "\t<block_size> - kernel block size (optional)\n");  
+  fprintf(stderr, "\t<output_file> - name of the output file (optional)\n");
+  
+  fprintf(stderr, "\tNote: If output file name is not supplied, output will not be written to disk.\n");
   exit(1);
 }
 
 int main(int argc, char** argv) {
+  int write_out = 0;
   char *version_string;  
   int version_number;
-  init_fpga2(&argc, &argv, &version_string, &version_number);  
+  init_fpga2(&argc, &argv, &version_string, &version_number);
+
+  int size;
+  int grid_rows,grid_cols = 0;
+  float *FilesavingTemp = NULL,*FilesavingPower = NULL;
+  char *tfile, *pfile, *ofile = NULL;
+  int block_size_x = BLOCK_X;
+  int block_size_y = BLOCK_Y;
+    
+  int total_iterations = 60;
+  int pyramid_height = 1; // number of combined iterations
+
+  if (argc < 5)
+    usage(argc, argv);
+  if((grid_rows = atoi(argv[1]))<=0||
+     (grid_cols = atoi(argv[1]))<=0||
+     (pyramid_height = atoi(argv[2]))<=0||
+     (total_iterations = atoi(argv[3]))<0)
+    usage(argc, argv);
 
   size_t devices_size;
   cl_int result, error;
@@ -346,7 +435,7 @@ int main(int argc, char** argv) {
     printf("ERROR: clGetContextInfo() failed\n");
     return -1;
   }
-  cl_device_id *device_list = (cl_device_id*)malloc(sizeof(cl_device_id)*num_devices);
+  device_list = (cl_device_id*)malloc(sizeof(cl_device_id)*num_devices);
   if( !device_list )
   {
     printf("ERROR: new cl_device_id[] failed\n");
@@ -358,64 +447,55 @@ int main(int argc, char** argv) {
   // Create command queue
   command_queue = clCreateCommandQueue( context, device, CL_QUEUE_PROFILING_ENABLE, &error );
   if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
-  if (version_number >= 11)
+  if (version_number >= 7)
   {
     command_queue2 = clCreateCommandQueue( context, device, CL_QUEUE_PROFILING_ENABLE, &error );
     if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
   }
 
-  int size;
-  int grid_rows,grid_cols = 0;
-  float *FilesavingTemp,*FilesavingPower; //,*MatrixOut; 
-  char *tfile, *pfile, *ofile;
-  int block_size = 16; // default if not specified at the command line
-    
-  int total_iterations = 60;
-  int pyramid_height = 1; // number of iterations
-
-  if (argc < 7)
-    usage(argc, argv);
-  if((grid_rows = atoi(argv[1]))<=0||
-     (grid_cols = atoi(argv[1]))<=0||
-     (pyramid_height = atoi(argv[2]))<=0||
-     (total_iterations = atoi(argv[3]))<0)
-    usage(argc, argv);
-
-  // pyramid_height must be 1 as the temporal blocking is not supported. It is
-  // implemented in the original OpenCL kernel, but removed in our versions,
-  // including the v0 kernel, for simplifying initial performance evaluations.
-  // It also reduces logic usage.
-  if (pyramid_height != 1) {
-      fprintf(stderr, "Error! pyramid_height parameter must be 1 as the temporal blocking is not supported.\n");
-      exit(1);
+#ifdef EMULATOR
+  if (version_number >= 7)
+  {
+    command_queue3 = clCreateCommandQueue( context, device, CL_QUEUE_PROFILING_ENABLE, &error );
+    if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
   }
+#endif
 
   tfile=argv[4];
   pfile=argv[5];
-  ofile=argv[6];
-  if (argc >= 8) 
-    block_size = atoi(argv[7]);
+  if (argc >= 7)
+  {
+    write_out = 1;
+    ofile=argv[6];
+  }
 
-  size=grid_rows*grid_cols;
+  size = (version_number < 7) ? grid_rows * grid_cols : grid_rows * grid_cols + PAD;
 
   // --------------- pyramid parameters --------------- 
-  int borderCols = (pyramid_height)*EXPAND_RATE/2;
-  int borderRows = (pyramid_height)*EXPAND_RATE/2;
-  int smallBlockCol = block_size-(pyramid_height)*EXPAND_RATE;
-  int smallBlockRow = block_size-(pyramid_height)*EXPAND_RATE;
-  int blockCols = grid_cols/smallBlockCol+((grid_cols%smallBlockCol==0)?0:1);
-  int blockRows = grid_rows/smallBlockRow+((grid_rows%smallBlockRow==0)?0:1);
+  int haloCols = (pyramid_height) * EXPAND_RATE / 2;
+  int haloRows = (pyramid_height) * EXPAND_RATE / 2;
+  int smallBlockCol = block_size_x - (pyramid_height) * EXPAND_RATE;
+  int smallBlockRow = block_size_y - (pyramid_height) * EXPAND_RATE;
+  int blockCols = grid_cols / smallBlockCol + ((grid_cols % smallBlockCol == 0) ? 0 : 1);
+  int blockRows = grid_rows / smallBlockRow + ((grid_rows % smallBlockRow == 0) ? 0 : 1);
 
-  FilesavingTemp = (float *) alignedMalloc(size*sizeof(float));
-  FilesavingPower = (float *) alignedMalloc(size*sizeof(float));
-  // MatrixOut = (float *) calloc (size, sizeof(float));
+  FilesavingTemp  = (float *) alignedMalloc(size * sizeof(float));
+  FilesavingPower = (float *) alignedMalloc(size * sizeof(float));
 
-  if( !FilesavingPower || !FilesavingTemp) // || !MatrixOut)
+  if (!FilesavingPower || !FilesavingTemp)
     fatal("unable to allocate memory");
 
   // Read input data from disk
-  readinput(FilesavingTemp, grid_rows, grid_cols, tfile);
-  readinput(FilesavingPower, grid_rows, grid_cols, pfile);
+  if (version_number < 7)
+  {
+    readinput(FilesavingTemp, grid_rows, grid_cols, tfile);
+    readinput(FilesavingPower, grid_rows, grid_cols, pfile);
+  }
+  else
+  {
+    readinput(FilesavingTemp + PAD, grid_rows, grid_cols, tfile);
+    readinput(FilesavingPower + PAD, grid_rows, grid_cols, pfile);
+  }
 
   // Load kernel source from file
   char *kernel_file_path = getVersionedKernelName2("hotspot_kernel", version_string);
@@ -433,22 +513,30 @@ int main(int argc, char** argv) {
   char clOptions[110];
   sprintf(clOptions, "-I.");
 #if defined(USE_JIT)
-#ifdef USE_RESTRICT
-  sprintf(clOptions + strlen(clOptions), " -DUSE_RESTRICT");
-#endif  
-  sprintf(clOptions + strlen(clOptions), " -DBSIZE=%d", block_size);
+  if (version_number == 4)
+  {
+    sprintf(clOptions + strlen(clOptions), " -DBLOCK_X=%d -DBLOCK_Y=%d -DSSIZE=%d", block_size_x, block_size_y, SSIZE);
+  }
+  else
+  {
+    sprintf(clOptions + strlen(clOptions), " -DBSIZE=%d -DSSIZE=%d", block_size_x, SSIZE);
+  }
 #endif
 
   // Create an executable from the kernel
   clBuildProgram_SAFE(program, 1, &device, clOptions, NULL, NULL);
 
   // Create kernel
-  if (version_number >= 11)
+  if (version_number >= 7)
   {
-    kernel_even = clCreateKernel(program, "hotspot_even", &error);
+    ReadKernel = clCreateKernel(program, "read", &error);
     if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
-    kernel_odd = clCreateKernel(program, "hotspot_odd", &error);
-    if (error != CL_SUCCESS) fatal_CL(error, __LINE__);    
+    WriteKernel = clCreateKernel(program, "write", &error);
+    if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
+#ifdef EMULATOR
+    ComputeKernel = clCreateKernel(program, "compute", &error);
+    if (error != CL_SUCCESS) fatal_CL(error, __LINE__); 
+#endif
   }
   else
   {
@@ -459,7 +547,8 @@ int main(int argc, char** argv) {
   GetTime(total_start);
 
   // Create two temperature matrices and copy the temperature input data
-  cl_mem MatrixTemp[2];
+  cl_mem MatrixTemp[2], MatrixPower = NULL;
+
   // Create input memory buffers on device
   MatrixTemp[0] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * size, NULL, &error);
   if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
@@ -469,25 +558,36 @@ int main(int argc, char** argv) {
   CL_SAFE_CALL(clEnqueueWriteBuffer(command_queue, MatrixTemp[0], CL_TRUE, 0, sizeof(float) * size, FilesavingTemp, 0, NULL, NULL));
 
   // Copy the power input data
-  cl_mem MatrixPower = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * size, NULL, &error);
+  MatrixPower = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * size, NULL, &error);
   if (error != CL_SUCCESS) fatal_CL(error, __LINE__);
 
   CL_SAFE_CALL(clEnqueueWriteBuffer(command_queue, MatrixPower, CL_TRUE, 0, sizeof(float) * size, FilesavingPower, 0, NULL, NULL));
 
   // Perform the computation
   int ret = compute_tran_temp(MatrixPower, MatrixTemp, grid_cols, grid_rows, total_iterations, pyramid_height,
-                              blockCols, blockRows, borderCols, borderRows, FilesavingTemp, FilesavingPower,
-                              version_number, block_size);
+                              blockCols, blockRows, haloCols, haloRows, version_number, block_size_x, block_size_y);
 
   // Copy final temperature data back
-  float *MatrixOut = (float*)alignedMalloc(sizeof(float) * size);
+  float *MatrixOut = NULL;
+
+  MatrixOut = (float*)alignedMalloc(sizeof(float) * size);
   CL_SAFE_CALL(clEnqueueReadBuffer(command_queue, MatrixTemp[ret], CL_TRUE, 0, sizeof(float) * size, MatrixOut, 0, NULL, NULL));
 
   GetTime(total_end);
   printf("Total run time was %f ms.\n", TimeDiff(total_start, total_end));
 
   // Write final output to output file
-  writeoutput(MatrixOut, grid_rows, grid_cols, ofile);
+  if (write_out)
+  {
+    if (version_number < 7)
+    {
+      writeoutput(MatrixOut, grid_rows, grid_cols, ofile);
+    }
+    else
+    {
+      writeoutput(MatrixOut + PAD, grid_rows, grid_cols, ofile);
+    }
+  }
 
   clReleaseMemObject(MatrixTemp[0]);
   clReleaseMemObject(MatrixTemp[1]);

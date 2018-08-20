@@ -50,4 +50,4 @@ run:
 	./$(EXE)
 
 clean: $(SRC)
-	$(RM) $(EXE) $(EXE).linkinfo result* *.aoco *.aocx $(KERNEL_NAMES)
+	$(RM) $(EXE) $(EXE).linkinfo result* *.aoco $(KERNEL_NAMES)

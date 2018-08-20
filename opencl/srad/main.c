@@ -15,25 +15,24 @@
 //	LIBRARIES
 //======================================================================================================================================================150
 
-#include <stdio.h>									// (in path known to compiler)	needed by printf
-#include <stdlib.h>									// (in path known to compiler)	needed by malloc, free
+#include <stdio.h>													// (in path known to compiler)	needed by printf
+#include <stdlib.h>													// (in path known to compiler)	needed by malloc, free
 
 //======================================================================================================================================================150
 //	HEADER
 //======================================================================================================================================================150
 
-#include "./main.h"									// (in current path)
+#include "./main.h"													// (in current path)
 
 //======================================================================================================================================================150
 //	UTILITIES
 //======================================================================================================================================================150
 
-#include "./util/graphics/graphics.h"							// (in specified path)
-#include "./util/graphics/resize.h"							// (in specified path)
-//#include "./util/timer/timer.h"							// (in specified path)
+#include "./util/graphics/graphics.h"									// (in specified path)
+#include "./util/graphics/resize.h"									// (in specified path)
 #include "../../common/timer.h"
 #include "../common/opencl_util.h"
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
 	#include "../../common/power_fpga.h"
 #endif
 //======================================================================================================================================================150
@@ -70,8 +69,8 @@ int main(int argc, char* argv [])
 	TimeStamp time5;
 	TimeStamp time6;
 
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-	// power parameters for Bittware A10PL4
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+  // power measurement parameters, only for Bittware and Nallatech's Arria 10 boards
 	double power = 0;
 	double energy = 0;
 #endif
@@ -115,11 +114,13 @@ int main(int argc, char* argv [])
 	//	INPUT ARGUMENTS
 	//======================================================================================================================================================150
 
-	if(argc != 5){
+	if(argc != 5)
+	{
 		printf("ERROR: wrong number of arguments\n");
 		return 0;
 	}
-	else{
+	else
+	{
 		niter = atoi(argv[1]);
 		lambda = atof(argv[2]);
 		Nr = atoi(argv[3]);						// it is 502 in the original image
@@ -142,27 +143,17 @@ int main(int argc, char* argv [])
 
 	image_ori = (fp*)malloc(sizeof(fp) * image_ori_elem);
 
-	read_graphics(	"../../data/srad/image.pgm",
-					image_ori,
-					image_ori_rows,
-					image_ori_cols,
-					1);
+	read_graphics("../../data/srad/image.pgm", image_ori, image_ori_rows, image_ori_cols, 1);
 
 	//====================================================================================================100
 	// 	RESIZE IMAGE (ASSUMING COLUMN MAJOR STORAGE OF image_orig)
 	//====================================================================================================100
 
-	Ne = Nr*Nc;
+	Ne = Nr * Nc;
 
 	image = (fp*)alignedMalloc(sizeof(fp) * Ne);
 
-	resize(	image_ori,
-				image_ori_rows,
-				image_ori_cols,
-				image,
-				Nr,
-				Nc,
-				1);
+	resize(image_ori, image_ori_rows, image_ori_cols,	image, Nr, Nc,	1);
 
 	//====================================================================================================100
 	// 	End
@@ -175,13 +166,13 @@ int main(int argc, char* argv [])
 	//======================================================================================================================================================150
 
 	// variables
-	r1     = 0;											// top row index of ROI
-	r2     = Nr - 1;										// bottom row index of ROI
-	c1     = 0;											// left column index of ROI
-	c2     = Nc - 1;										// right column index of ROI
+	r1 = 0;														// top row index of ROI
+	r2 = Nr - 1;													// bottom row index of ROI
+	c1 = 0;														// left column index of ROI
+	c2 = Nc - 1;													// right column index of ROI
 
 	// ROI image size
-	NeROI = (r2-r1+1)*(c2-c1+1);									// number of elements in ROI, ROI size
+	NeROI = (r2-r1+1)*(c2-c1+1);										// number of elements in ROI, ROI size
 
 	// allocate variables for surrounding pixels
 	mem_size_i = sizeof(int) * Nr;
@@ -194,22 +185,22 @@ int main(int argc, char* argv [])
 		jE = (int *)alignedMalloc(mem_size_j) ;							// east surrounding element
 
 		// N/S/W/E indices of surrounding pixels (every element of IMAGE)
-		for (i=0; i<Nr; i++)
+		for (i = 0; i < Nr; i++)
 		{
-			iN[i] = i-1;									// holds index of IMAGE row above
-			iS[i] = i+1;									// holds index of IMAGE row below
+			iN[i] = i - 1;											// holds index of IMAGE row above
+			iS[i] = i + 1;											// holds index of IMAGE row below
 		}
-		for (j=0; j<Nc; j++)
+		for (j = 0; j < Nc; j++)
 		{
-			jW[j] = j-1;									// holds index of IMAGE column on the left
-			jE[j] = j+1;									// holds index of IMAGE column on the right
+			jW[j] = j - 1;											// holds index of IMAGE column on the left
+			jE[j] = j + 1;											// holds index of IMAGE column on the right
 		}
 
 		// N/S/W/E boundary conditions, fix surrounding indices outside boundary of image
-		iN[0]    = 0;										// changes IMAGE top row index from -1 to 0
-		iS[Nr-1] = Nr-1;									// changes IMAGE bottom row index from Nr to Nr-1
-		jW[0]    = 0;										// changes IMAGE leftmost column index from -1 to 0
-		jE[Nc-1] = Nc-1;									// changes IMAGE rightmost column index from Nc to Nc-1
+		iN[0]      = 0;											// changes IMAGE top row index from -1 to 0
+		iS[Nr - 1] = Nr-1;											// changes IMAGE bottom row index from Nr to Nr-1
+		jW[0]      = 0;											// changes IMAGE leftmost column index from -1 to 0
+		jE[Nc - 1] = Nc-1;											// changes IMAGE rightmost column index from Nc to Nc-1
 	}
 
 	GetTime(time3);
@@ -217,40 +208,34 @@ int main(int argc, char* argv [])
 	// 	KERNEL
 	//======================================================================================================================================================150
 
-	kernel_gpu_opencl_wrapper(	image,								// input image
-                                        Nr,								// IMAGE nbr of rows
-                                        Nc,								// IMAGE nbr of cols
-                                        Ne,								// IMAGE nbr of elem
-                                        niter,								// nbr of iterations
-                                        lambda,								// update step size
-                                        NeROI,								// ROI nbr of elements
-                                        iN,
-                                        iS,
-                                        jE,
-                                        jW,
-                                        mem_size_i,
-                                        mem_size_j,
-                                        version,
-//                                        &kernelRunTime,						// Kernel execution time
-                                        &extractTime,							// Image extraction time
-                                        &computeTime,							// Compute loop time
-                                        &compressTime							// Image compression time
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-                                     ,  &power								// Power usage for supported boards
+	kernel_gpu_opencl_wrapper(image,									// input image
+                               Nr,										// IMAGE nbr of rows
+                               Nc,										// IMAGE nbr of cols
+                               Ne,										// IMAGE nbr of elem
+                               niter,									// nbr of iterations
+                               lambda,									// update step size
+                               NeROI,									// ROI nbr of elements
+                               iN,
+                               iS,
+                               jE,
+                               jW,
+                               mem_size_i,
+                               mem_size_j,
+                               version,
+                               &extractTime,								// Image extraction time
+                               &computeTime,								// Compute loop time
+                               &compressTime								// Image compression time
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+                            ,  &power									// Power usage for supported boards
 #endif
-	                         );
+                               );
 	GetTime(time4);
 
 	//======================================================================================================================================================150
 	// 	WRITE OUTPUT IMAGE TO FILE
 	//======================================================================================================================================================150
 
-	write_graphics(	"./output/image_out.pgm",
-					image,
-					Nr,
-					Nc,
-					1,
-					255);
+	write_graphics("./output/image_out.pgm", image, Nr, Nc, 1, 255);
 
 	GetTime(time5);
 
@@ -271,30 +256,21 @@ int main(int argc, char* argv [])
 	//	DISPLAY TIMING
 	//======================================================================================================================================================150
 
-        double total_ms = TimeDiff(time0, time5);
+	double total_ms = TimeDiff(time0, time5);
 	printf("Time spent in different stages of the application:\n\n");
-	printf("%.9f s, %.4f %% : READ COMMAND LINE PARAMETERS\n",
-               TimeDiff(time0, time1) / 1000.0, TimeDiff(time0, time1) / total_ms * 100);
-	printf("%.9f s, %.4f %% : READ AND RESIZE INPUT IMAGE FROM FILE\n",
-               TimeDiff(time1, time2) / 1000.0, TimeDiff(time1, time2) / total_ms * 100);
-	printf("%.9f s, %.4f %% : SETUP\n",
-               TimeDiff(time2, time3) / 1000.0, TimeDiff(time2, time3) / total_ms * 100);
+	printf("%.9f s, %.4f %% : READ COMMAND LINE PARAMETERS\n", TimeDiff(time0, time1) / 1000.0, TimeDiff(time0, time1) / total_ms * 100);
+	printf("%.9f s, %.4f %% : READ AND RESIZE INPUT IMAGE FROM FILE\n", TimeDiff(time1, time2) / 1000.0, TimeDiff(time1, time2) / total_ms * 100);
+	printf("%.9f s, %.4f %% : SETUP\n", TimeDiff(time2, time3) / 1000.0, TimeDiff(time2, time3) / total_ms * 100);
 	// Below value accounts for anything that happens in kernel_gpu_opencl_wrapper other than image extraction, compute loop and image compression
-	printf("%.9f s, %.4f %% : KERNEL PREPARATION\n",
-               (TimeDiff(time3, time4) - extractTime - computeTime - compressTime) / 1000.0, (TimeDiff(time3, time4) - extractTime - computeTime - compressTime) / total_ms * 100);
-	printf("%.9f s, %.4f %% : EXTRACT IMAGE\n",
-               extractTime / 1000.0, extractTime / total_ms * 100);
-	printf("%.9f s, %.4f %% : COMPUTE\n",
-               computeTime / 1000.0, computeTime / total_ms * 100);	
-	printf("%.9f s, %.4f %% : COMPRESS IMAGE\n",
-               compressTime / 1000.0, compressTime / total_ms * 100);
-	printf("%.9f s, %.4f %% : WRITE OUTPUT IMAGE TO FILE\n",
-               TimeDiff(time4, time5) / 1000.0, TimeDiff(time4, time5) / total_ms * 100);
-	printf("%.9f s, %.4f %% : FREE MEMORY\n",
-               TimeDiff(time5, time6) / 1000.0, TimeDiff(time5, time6) / total_ms * 100);
+	printf("%.9f s, %.4f %% : KERNEL PREPARATION\n", (TimeDiff(time3, time4) - extractTime - computeTime - compressTime) / 1000.0, (TimeDiff(time3, time4) - extractTime - computeTime - compressTime) / total_ms * 100);
+	printf("%.9f s, %.4f %% : EXTRACT IMAGE\n", extractTime / 1000.0, extractTime / total_ms * 100);
+	printf("%.9f s, %.4f %% : COMPUTE\n", computeTime / 1000.0, computeTime / total_ms * 100);	
+	printf("%.9f s, %.4f %% : COMPRESS IMAGE\n", compressTime / 1000.0, compressTime / total_ms * 100);
+	printf("%.9f s, %.4f %% : WRITE OUTPUT IMAGE TO FILE\n", TimeDiff(time4, time5) / 1000.0, TimeDiff(time4, time5) / total_ms * 100);
+	printf("%.9f s, %.4f %% : FREE MEMORY\n", TimeDiff(time5, time6) / 1000.0, TimeDiff(time5, time6) / total_ms * 100);
 
 	printf("\nComputation done in %0.3lf ms.\n", computeTime);
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
 	energy = GetEnergyFPGA(power, computeTime);
 	if (power != -1) // -1 --> failed to read energy values
 	{

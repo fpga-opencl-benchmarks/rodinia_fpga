@@ -19,16 +19,23 @@ int rows, cols;
 int* data;
 int** wall;
 int* result;
+FILE *resultFile;
+char* ofile = NULL;
+bool write_out = 0;
 #define M_SEED 9
 
 void
 init(int argc, char** argv)
 {
-	if(argc==3){
+	if(argc==3 || argc==4){
 		cols = atoi(argv[1]);
 		rows = atoi(argv[2]);
+		if (argc==4){
+			ofile = argv[3];
+			write_out = 1;
+		}
 	}else{
-                printf("Usage: pathfiner width num_of_steps\n");
+                printf("Usage: %d width num_of_steps output_file\n", argv[0]);
                 exit(0);
         }
 	data = new int[rows*cols];
@@ -74,14 +81,17 @@ fatal(char *s)
 
 int main(int argc, char** argv)
 {
-    run(argc,argv);
-
-    return EXIT_SUCCESS;
-}
-
-void run(int argc, char** argv)
-{
     init(argc, argv);
+
+    if (write_out)
+    {
+        resultFile = fopen(ofile, "w");
+        if (resultFile == NULL)
+        {
+            printf("Failed to open result file!\n");
+            exit(-1);
+        }
+    }
 
     unsigned long long cycles;
 
@@ -119,25 +129,27 @@ void run(int argc, char** argv)
       printf("Average power consumption is %0.3lf watts.\n", totalEnergy/(totalTime/1000.0));
     }
 
-#ifdef BENCH_PRINT
-
-    for (int i = 0; i < cols; i++)
-
-            printf("%d ",data[i]) ;
-
-    printf("\n") ;
-
-    for (int i = 0; i < cols; i++)
-
-            printf("%d ",dst[i]) ;
-
-    printf("\n") ;
-
-#endif
+    if (write_out)
+    {
+        #ifdef BENCH_PRINT
+        for (int i = 0; i < cols; i++)
+        {
+            fprintf(resultFile, "%d ", data[i]);
+        }
+        fprintf(resultFile, "\n") ;
+        #endif
+    
+        for (int i = 0; i < cols; i++)
+        {
+            fprintf(resultFile, "%d\n", dst[i]);
+        }
+        fclose(resultFile);
+    }
 
     delete [] data;
     delete [] wall;
     delete [] dst;
     delete [] src;
+    
+    return EXIT_SUCCESS;
 }
-

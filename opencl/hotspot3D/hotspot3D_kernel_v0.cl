@@ -1,8 +1,8 @@
-#include "../common/opencl_kernel_common.h"
+#include "hotspot3D_common.h"
 
-__kernel void hotspotOpt1(__global float* RESTRICT p,
-                          __global float* RESTRICT tIn,
-                          __global float* RESTRICT tOut,
+__kernel void hotspotOpt1(__global float* restrict p,
+                          __global float* restrict tIn,
+                          __global float* restrict tOut,
                                    float           sdc,
                                    int             nx,
                                    int             ny,
@@ -15,8 +15,6 @@ __kernel void hotspotOpt1(__global float* RESTRICT p,
                                    float           cb, 
                                    float           cc)
 {
-  float amb_temp = 80.0;
-
   int i = get_global_id(0);
   int j = get_global_id(1);
   int c = i + j * nx;
@@ -30,8 +28,8 @@ __kernel void hotspotOpt1(__global float* RESTRICT p,
   float temp1, temp2, temp3;
   temp1 = temp2 = tIn[c];
   temp3 = tIn[c+xy];
-  tOut[c] = cc * temp2 + cw * tIn[W] + ce * tIn[E] + cs * tIn[S]
-    + cn * tIn[N] + cb * temp1 + ct * temp3 + sdc * p[c] + ct * amb_temp;
+  tOut[c] = cc * temp2 + cn * tIn[N] + cs * tIn[S] + ce * tIn[E]
+    + cw * tIn[W] + ct * temp3 + cb * temp1 + sdc * p[c] + ct * AMB_TEMP;
   c += xy;
   W += xy;
   E += xy;
@@ -42,8 +40,8 @@ __kernel void hotspotOpt1(__global float* RESTRICT p,
       temp1 = temp2;
       temp2 = temp3;
       temp3 = tIn[c+xy];
-      tOut[c] = cc * temp2 + cw * tIn[W] + ce * tIn[E] + cs * tIn[S]
-        + cn * tIn[N] + cb * temp1 + ct * temp3 + sdc * p[c] + ct * amb_temp;
+      tOut[c] = cc * temp2 + cn * tIn[N] + cs * tIn[S] + ce * tIn[E]
+        + cw * tIn[W] + ct * temp3 + cb * temp1 + sdc * p[c] + ct * AMB_TEMP;
       c += xy;
       W += xy;
       E += xy;
@@ -52,8 +50,8 @@ __kernel void hotspotOpt1(__global float* RESTRICT p,
   }
   temp1 = temp2;
   temp2 = temp3;
-  tOut[c] = cc * temp2 + cw * tIn[W] + ce * tIn[E] + cs * tIn[S]
-    + cn * tIn[N] + cb * temp1 + ct * temp3 + sdc * p[c] + ct * amb_temp;
+  tOut[c] = cc * temp2 + cn * tIn[N] + cs * tIn[S] + ce * tIn[E]
+    + cw * tIn[W] + ct * temp3 + cb * temp1 + sdc * p[c] + ct * AMB_TEMP;
   return;
 }
 

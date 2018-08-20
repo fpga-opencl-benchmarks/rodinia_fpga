@@ -1,6 +1,6 @@
 #!/bin/bash
 
-benchmarks=(nw hotspot pathfinder srad lud cfd)
+benchmarks=(nw hotspot hotspot3D pathfinder srad lud cfd)
 runs=5
 
 echo "Benchmark     Time (ms)     Energy Usage (J)  Average Power Consumption (Watts)"

@@ -1,5 +1,4 @@
 #include "../problem_size.h"
-#include "../../common/opencl_kernel_common.h"
 
 //========================================================================================================================================================================================================200
 //	DEFINE/INCLUDE
@@ -50,16 +49,16 @@ typedef struct knode2 {
 
 __kernel void 
 findRangeK(	long height,
-                __global knode2 * RESTRICT knodesD,
+                __global knode2 * restrict knodesD,
                 long knodes_elem,
-                __global long * RESTRICT currKnodeD,
-                __global long * RESTRICT offsetD,
-                __global long * RESTRICT lastKnodeD,
-                __global long * RESTRICT offset_2D,
-                __global int * RESTRICT startD,
-                __global int * RESTRICT endD,
-                __global int * RESTRICT RecstartD, 
-                __global int * RESTRICT ReclenD,
+                __global long * restrict currKnodeD,
+                __global long * restrict offsetD,
+                __global long * restrict lastKnodeD,
+                __global long * restrict offset_2D,
+                __global int * restrict startD,
+                __global int * restrict endD,
+                __global int * restrict RecstartD, 
+                __global int * restrict ReclenD,
                 int count,
                 int order) {
 #ifdef FINDRANGEK_UNROLL      

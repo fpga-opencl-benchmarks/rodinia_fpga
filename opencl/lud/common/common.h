@@ -8,7 +8,13 @@
 extern "C" {
 #endif
 
-
+#ifndef BSIZE
+	#ifdef AOCL_BOARD_de5net_a7
+		#define BSIZE 96
+	#else
+		#define BSIZE 16
+	#endif
+#endif
 
 #define GET_RAND_FP ( (float)rand() /   \
                      ((float)(RAND_MAX)+(float)(1)) )

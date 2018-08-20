@@ -16,8 +16,12 @@ all: $(EXE)
 CXXFLAGS += $(KERNEL_DIM) $(OPENCL_INC)
 LDFLAGS += $(OPENCL_LIB)
 
-ifeq ($(BOARD),a10pl4_dd4gb_gx115es3)
+ifeq ($(BOARD),a10pl4_dd4gb_gx115)
 	LDFLAGS += $(BITTWARE_LIB) -fopenmp
+endif
+
+ifeq ($(BOARD),p385a_sch_ax115)
+	LDFLAGS += -fopenmp
 endif
 
 euler3d: euler3d.o host_common.o CLHelper2.o
@@ -96,7 +100,7 @@ endif
 clean: clean_aocl
 
 clean_aocl:
-	rm -f *.aoco *.aocx
+	rm -f *.aoco
 	find .  -maxdepth 1 -name "$(KERNEL_PRE)_v[0-9]*" "$(KERNEL_NON_PRE)_v[0-9]*" -type d | xargs rm -rf
 
 endif # ifdef ALTERA

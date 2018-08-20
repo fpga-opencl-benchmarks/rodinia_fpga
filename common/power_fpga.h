@@ -1,20 +1,26 @@
-// These functions are based on the "read_sensor" example provided by Bittware and depend on Bittware's headers and libraries.
+// The first set of functions are based on the "read_sensor" example provided by Bittware and depend on Bittware's headers and libraries.
+// The second set of functions are based on the example provided in Section 7.5 of Nallatehc's OpenCL A10 BSP Reference Guide and depend on Nallatech's headers and libraries.
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <omp.h>
-#include "hil.h"
-#include "bmclib.h"
 
-#define DeviceNum 0 // Used to choose target FPGA board
-#define SDR       0 // Used to choose the target sensor, sensor 0 is the power sensor on the AL10P4 board
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115
+	#include "hil.h"
+	#include "bmclib.h"
+#elif AOCL_BOARD_p385a_sch_ax115
+	#include "aocl_mmd.h"
 
-BMC_Handle bmc;
-HHil hil;
-HDevice hdev;
+	#ifdef __APPLE__
+		#include <OpenCL/opencl.h>
+	#else
+		#include <CL/cl.h>
+	#endif
+#endif
 
+#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115
 //====================================================================================================================================
 // FPGA Energy Calculator for Bittware's FPGA boards
 //====================================================================================================================================
@@ -29,6 +35,13 @@ HDevice hdev;
 // The host code should have two OpenMP threads, one running the OpenCL kernel and the other calling this function
 // A "#pragma omp barrier" should be put before the kernel call
 // Flag should become one in the kernel thread after kernel execution has finished (after clFinish())
+
+#define DeviceNum 0 // Used to choose target FPGA board
+#define SDR       0 // Used to choose the target sensor, sensor 0 is the power sensor on the AL10P4 board
+
+BMC_Handle bmc;
+HHil hil;
+HDevice hdev;
 
 static inline void cleanup()
 {
@@ -94,7 +107,7 @@ static inline double GetPowerFPGA(int* flag)
 
 	if (!p_periph_table)
 	{
-		printf("Unsupported board type %d\n", boardtype);
+		printf("Unsupported board type %d.\n", boardtype);
 		cleanup();
 		return -1;
 	}
@@ -117,6 +130,7 @@ static inline double GetPowerFPGA(int* flag)
 			{
 				// Returns device power usage in Watt
 				bmc_sdr_read_sensor(bmc, record, value, sizeof(value), state, sizeof(state));
+
 				power = atof(value);
 				powerSum = powerSum + power;
 				count++;
@@ -137,6 +151,77 @@ static inline double GetPowerFPGA(int* flag)
 
 	return (double)(powerSum)/(double)(count);
 }
+
+#elif AOCL_BOARD_p385a_sch_ax115
+//====================================================================================================================================
+// FPGA Energy Calculator for Nallatech's FPGA boards
+//====================================================================================================================================
+
+// AOCL_BOARD_PACKAGE_ROOT must point to Nallatech's BSP that incldues the aocl_mmd.h header file.
+// Unlike the function for the Bittware board, the function for the Nallatech's board needs the OpenCL device list as input
+
+// This function works very similar to the GPU power function
+// Returns average power usage in Watt from when it is called until when "flag" becomes one
+// Sampling is done every 10 milliseconds
+// The host code should have two OpenMP threads, one running the OpenCL kernel and the other calling this function
+// A "#pragma omp barrier" should be put before the kernel call
+// Flag should become one in the kernel thread after kernel execution has finished (after clFinish())
+
+typedef void* (*get_board_extension_function_address_fn_t)(const char* func_name, cl_device_id device);
+typedef void* (*aocl_mmd_card_info_fn_t)(const char*, aocl_mmd_info_t, size_t, void*, size_t* );
+
+static inline void cleanup()
+{
+	#pragma omp barrier
+}
+
+static inline double GetPowerFPGA(int* flag, cl_device_id* device)
+{
+	void *tempPointer;
+
+	float power, powerSum = 0;
+	size_t count = 0;
+	size_t returnedSize;
+
+	get_board_extension_function_address_fn_t board_extension_function_address = (get_board_extension_function_address_fn_t) clGetExtensionFunctionAddress ("clGetBoardExtensionFunctionAddressAltera");
+	if (board_extension_function_address == NULL )
+	{
+		printf ("Failed to get clGetBoardExtensionFunctionAddressAltera.\n");
+		cleanup();
+		return -1;
+	}
+
+	tempPointer = board_extension_function_address("aocl_mmd_card_info", device[0]);
+
+	aocl_mmd_card_info_fn_t aocl_mmd_card_info_fn = (aocl_mmd_card_info_fn_t)tempPointer;
+	if (aocl_mmd_card_info_fn == NULL )
+	{
+		printf ("Failed to get aocl_mmd_card_info_fn address.\n");
+		cleanup();
+		return -1;
+	}
+
+	#pragma omp barrier
+	while(*flag == 0)
+	{
+		// Returns device power usage in Watt
+		// aclnalla_pcie0 is the board name string
+		aocl_mmd_card_info_fn("aclnalla_pcie0", AOCL_MMD_POWER, sizeof(float), (void*) &power, &returnedSize);
+
+		if (power >= 10.0 && power <= 80.0)
+		{
+			powerSum = powerSum + power;
+			count++;
+		}
+
+		// Sleep for 10 ms
+		usleep(10000);
+	}
+
+	return (double)(powerSum)/(double)(count);
+}
+
+#endif
 
 // Returns amount of energy used in jouls
 // "power" is average power usage in Watt from the GetPowerGPU() fucntion

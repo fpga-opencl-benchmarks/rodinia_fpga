@@ -30,7 +30,7 @@ void kernel_gpu_opencl_wrapper(	fp* image,					// input image
                                 double* extractTime,				// For image compression kernel (before compute loop)
                                 double* computeTime,				// For the compute loop, similar to the CUDA version of the benchmark
                                 double* compressTime				// For image compression kernel (after compute loop)
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
                              ,  double* power					// Power usage for supported boards
 #endif
                              );

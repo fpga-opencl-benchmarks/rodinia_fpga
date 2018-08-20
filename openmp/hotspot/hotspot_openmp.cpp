@@ -32,8 +32,8 @@ double energyStart, energyEnd, totalEnergy;
 
 /* chip parameters	*/
 const FLOAT t_chip = 0.0005;
-const FLOAT chip_height = 0.016;
-const FLOAT chip_width = 0.016;
+const FLOAT chip_height = 1.6;
+const FLOAT chip_width = 1.6;
 
 #ifdef OMP_OFFLOAD
 	#pragma offload_attribute(push, target(mic))
@@ -256,11 +256,12 @@ void usage(int argc, char **argv)
 int main(int argc, char **argv)
 {
 	int grid_rows, grid_cols, sim_time, i;
+	int write_out = 0;
 	FLOAT *temp, *power, *result;
 	char *tfile, *pfile, *ofile;
 	
 	/* check validity of inputs	*/
-	if (argc != 8)
+	if (argc != 8 && argc != 7)
 		usage(argc, argv);
 	if ((grid_rows = atoi(argv[1])) <= 0 ||
 		(grid_cols = atoi(argv[2])) <= 0 ||
@@ -279,7 +280,11 @@ int main(int argc, char **argv)
 	/* read initial temperatures and input power	*/
 	tfile = argv[5];
 	pfile = argv[6];
-	ofile = argv[7];
+	if (argc == 8)
+	{
+		write_out = 1;
+		ofile=argv[7];
+	}
 
 	read_input(temp, grid_rows, grid_cols, tfile);
 	read_input(power, grid_rows, grid_cols, pfile);
@@ -301,21 +306,23 @@ int main(int argc, char **argv)
 	fprintf(stdout, "Final Temperatures:\n");
 #endif
 
-#ifdef OUTPUT
-	FILE *ofile_fp = fopen(ofile, "w");
-	if (!ofile_fp)
+	if (write_out)
 	{
-		printf("could not open output file, skipping...\n");
-	}
-	else
-	{
-		for(i=0; i < grid_rows * grid_cols; i++)
+		FILE *ofile_fp = fopen(ofile, "w");
+		if (!ofile_fp)
 		{
-			fprintf(ofile_fp, "%d\t%f\n", i, temp[i]);
+			printf("could not open output file, skipping...\n");
 		}
-		fclose(ofile_fp);
+		else
+		{
+			for(i=0; i < grid_rows * grid_cols; i++)
+			{
+				fprintf(ofile_fp, "%d\t%f\n", i, temp[i]);
+			}
+			fclose(ofile_fp);
+		}
 	}
-#endif
+
 	/* cleanup	*/
 	free(temp);
 	free(power);

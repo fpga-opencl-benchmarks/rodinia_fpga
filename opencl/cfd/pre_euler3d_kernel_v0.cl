@@ -5,7 +5,6 @@
 ============================================================ */
 #include "common.h"
 #include "kernel_common.h"
-#include "../common/opencl_kernel_common.h"
 
 __kernel void compute_step_factor(__global float* variables, 
                                   __global float* areas, 

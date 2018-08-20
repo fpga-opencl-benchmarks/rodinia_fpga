@@ -1,6 +1,5 @@
 #include "common.h"
 #include "kernel_common.h"
-#include "../common/opencl_kernel_common.h"
 
 __kernel void compute_step_factor(__global float* v_density,
                                   __global float* v_momentum_x,

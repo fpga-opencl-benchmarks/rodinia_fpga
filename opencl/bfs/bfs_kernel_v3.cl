@@ -1,5 +1,4 @@
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store: enable
-#include "../common/opencl_kernel_common.h"
 //Structure to hold a node information
 typedef struct{
 	int starting;
@@ -7,12 +6,12 @@ typedef struct{
 } Node;
 
 //--7 parameters
-__kernel void BFS_1(__global const Node* RESTRICT g_graph_nodes,
-		    __global const int*  RESTRICT g_graph_edges, 
-		    __global char*       RESTRICT g_graph_mask, 
-		    __global char*       RESTRICT g_updating_graph_mask, 
-		    __global char*       RESTRICT g_graph_visited, 
-		    __global int*        RESTRICT g_cost, 
+__kernel void BFS_1(__global const Node* restrict g_graph_nodes,
+		    __global const int*  restrict g_graph_edges, 
+		    __global char*       restrict g_graph_mask, 
+		    __global char*       restrict g_updating_graph_mask, 
+		    __global char*       restrict g_graph_visited, 
+		    __global int*        restrict g_cost, 
 		             const int            no_of_nodes)
 {
 	#pragma unroll 7
@@ -35,10 +34,10 @@ __kernel void BFS_1(__global const Node* RESTRICT g_graph_nodes,
 }
 
 //--5 parameters
-__kernel void BFS_2(__global char*     RESTRICT g_graph_mask, 
-		    __global char*     RESTRICT g_updating_graph_mask, 
-		    __global char*     RESTRICT g_graph_visited, 
-		    __global char*     RESTRICT g_over,
+__kernel void BFS_2(__global char*     restrict g_graph_mask, 
+		    __global char*     restrict g_updating_graph_mask, 
+		    __global char*     restrict g_graph_visited, 
+		    __global char*     restrict g_over,
 		             const int          no_of_nodes)
 {
 	#pragma unroll 64

@@ -13,4 +13,8 @@
 #endif 
 #endif // BSIZE
 
+#ifndef PAR
+	#define PAR 4
+#endif
+
 #endif 

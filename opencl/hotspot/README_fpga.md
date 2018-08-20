@@ -9,10 +9,10 @@ Use the build script as follows:
 This will build a default set of kernels. Alternatively, the make command can be used to build a specific kernel variation:
 
 ```
-make ALTERA=1 board=de5net_a7 v=9 kernels
+make ALTERA=1 board=*board_name* v=9 kernels
 ```
 
-To build the host program, run the command as follwos:
+To build the host program, run the command as follows:
 
 ```
 make ALTERA=1 HOST_ONLY
@@ -26,82 +26,76 @@ The benchmark has a number of arguments:
 ./hotspot <matrix-size> <temporal-blocking-degree> <number-of-iterations> <input-temperature-file> <input-power-file> <output-file> <block-size> [kernel-version]
 ```
 
-The arguments except for the last two are the same as the original version. The block-size argument is the BSIZE parameter in the kernels. The last kernel-version argument is the string appended to the kernel name in the compiled aocx file name.
+The arguments except for the last two are the same as the original version. The block-size argument is the BSIZE parameter in the kernels.
 
 Eg.:
 
 ```
-./hotspot 1024 1 1000 ../../data/hotspot/temp_1024 ../../data/hotspot/power_1024 output.txt 512 v9_BSIZE512_SSIZE8
+./hotspot 1024 1 1000 ../../data/hotspot/temp_1024 ../../data/hotspot/power_1024 output.txt v5
 ```
-
-Note that in the current implementation the temporal blocking parameter must be 1 as the blocking is omitted.
 
 # Kernel variations
 
-## hotspot_kernel_original
-
-- The original kernel.
-
 ## v0
 
-- Based on the original kernel.
-- Simplified by undoing the temporal blocking optimization in order to
-simplify performance analysis. The temporal blocking optimization may
-be applied again as an advanced optimization.
+- Original NDRange kernel with restrict.
+- Parameters: BSIZE
 
 ## v1
 
-- Straightforward sequential implementation with a doubly nested loop.
+- Straightforward single work-item implementation with a doubly-nested
+loop and restrict.
 
 ## v2
 
 - Based on v0
-- Adds restrict to v0
-- Parameters: BSIZE, SIMD, and CUSIZE
+- Parameters: BSIZE, SSIZE
+- Adds reqd_work_group_size and SIMD and moves calculation of constants out of the
+kernel and to the host.
 
 ## v3
 
 - Based on v1
-- Parameters: BSIZE
-- Add restrict. Unrolling the inner loop by BSIZE.
+- Parameters: SSIZE
+- Unrolls innermost loop. Replaces address arithmetic with loads to temporary
+buffers to reduce number of ports to external memory in presence of unrolling.
+Moves calculation of constants out of the kernel and to the host.
+
+## v4
+
+- Based on v2
+- Parameters: BLOCK_X, BLOCK_Y, SSIZE, UNROLL
+- temp_t and power_on_cuda buffers are removed and replaced with private registers
+since each is written and read only once by the same thread. All accesses to the
+remaining local buffer inside the iteration loop are replaced with writes to and
+reads from registers to allow correct coalescing on accesses to the local buffer,
+reducing number of reads from the buffer from 35 to 5. Furthermore, the write to
+the remaining local buffer from external memory and the updated output of the previous
+iteration are combined into one access using a conditional statement over an extra
+register. This halves Block RAM replication factor due to reducing number of write
+ports from two to one. This also adds the possibility of removing on of the barriers;
+however, doing so reduces the number of simultaneous work-groups the compiler allows,
+which results in performance reduction. Hence, we keep the false barrier to achieve
+better performance, at the cost of slightly higher Block RAM usage. Finally, possibility
+of using non-square blocks and unrolling the iteration loop was added. With all these
+optimizations, up to an unroll factor of three can be used before the number of write
+ports reaches four, forcing port sharing.
 
 ## v5
 
-- Based on v3
-- Parameters: BSIZE
-- Vertically decomposes a given 2D matrix to columns of length BSIZE,
-  and attempt to pipeline the processing of vertical loop with the
-  BSIZE-length horizontal loop completely unrolled.
+- Complete kernel rewrite.
+- Parameters: BLOCK_X, BLOXK_Y, SSIZE. BLOCK_X needs to be divisible by SSIZE.
+- Implements spatial block with rectangular blocks and shift register-based
+on-chip buffers. Used loop collapse and exit condition optimization. Also
+unrolls the loop to vectorize. Performance will not scale after memory
+bandwidth is saturated.
 
-## v7
+## v7 (BEST)
 
-- Parameters: BSIZE, SSIZE. BSIZE needs to be divisible by SSIZE.
-- Similar to v5, but does not completely unroll the horizontal loop,
-  but just unrolls SSIZE iterations. It has one loop to traverse the
-  sub matrix, and one outerloop that traverses across the columns.
-
-## v9
-
-- Parameters: BSIZE, SSIZE. BSIZE needs to be divisible by SSIZE.
-- Similar to v7, a given matrix is decomposed vertically to BSIZE
-  columns. Unlike v7, it does not use the loop nest since the Altera
-  compiler seems to have problems with generating efficient pipelines
-  from nested loops.
-
-## v11 (BEST)
-- Parameters: BSIZE, SSIZE. BSIZE needs to be divisible by SSIZE.
-- This version uses the v9 implementation as base and adds a second
-  very similar kernel so that the process is done two iterations at
-  a time, with data traveling between the two kernels using channels.
-  This significantly reduces memory load since both the output of the
-  first iteration and the content of the power buffer are forwarded
-  to the second kernel through channels.
-  The second kernel starts from x = -1, instead of 0. This way, it is
-  always one column behind the first kernel, while having the same
-  BSIZE and SSIZE. On the boundary, the last column of each block from
-  the first kernel will be processed as the first column of the next
-  block in the second kernel, when its right neighbor has also already
-  been computed by the first kernel. Though the left and current indexes
-  for that column are written to and read from a global buffer since they
-  cannot be transferred via channels due to possible large size of the
-  necessary buffer which depends on input size.
+- Based on v5.
+- Parameters: BSIZE, SSIZE, TIME. BSIZE needs to be divisible by SSIZE.
+- Implements temporal blocking on top of spatial blocking.
+Decouples memory accesses from compute. Defines compute kernel as autorun and
+replicates it by the degree of temporal parallelism (TIME). Halo size is adjusted
+based on TIME. Complex performance and area trade-off between all the parameters.
+Refer to FPGA'18 paper for more info.

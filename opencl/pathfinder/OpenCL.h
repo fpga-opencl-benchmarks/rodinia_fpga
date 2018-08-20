@@ -33,6 +33,7 @@ public:
 	cl_command_queue q();
 	void launch(string toLaunch, int version);
 	cl_command_queue        command_queue;
+	cl_device_id*           devices;
 //	size_t localSize();
 	
 private:
@@ -42,7 +43,6 @@ private:
 	cl_int                  ret;               // Holds the error code returned by cl functions.
 	cl_platform_id          platform_id[100];
 //	cl_device_id            device_id[100];
-	cl_device_id*           devices;
 	map<string, cl_kernel>  kernelArray;
 	cl_context              context;
 	cl_program              program;

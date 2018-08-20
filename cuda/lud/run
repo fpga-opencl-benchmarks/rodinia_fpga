@@ -1,2 +1,2 @@
 #./cuda/lud_cuda -i ../../data/lud/2048.dat
-./cuda/lud_cuda -s 8192
+./cuda/lud_cuda -s 11520

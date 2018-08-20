@@ -1,5 +1,4 @@
 #include "../problem_size.h"
-#include "../../common/opencl_kernel_common.h"
 
 // #ifdef __cplusplus
 // extern "C" {

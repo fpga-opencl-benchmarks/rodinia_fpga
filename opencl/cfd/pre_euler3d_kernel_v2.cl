@@ -5,11 +5,10 @@
 ============================================================ */
 #include "common.h"
 #include "kernel_common.h"
-#include "../common/opencl_kernel_common.h"
 
-__kernel void compute_step_factor(__global float* RESTRICT variables, 
-                                  __global float* RESTRICT areas, 
-                                  __global float* RESTRICT step_factors,
+__kernel void compute_step_factor(__global float* restrict variables, 
+                                  __global float* restrict areas, 
+                                  __global float* restrict step_factors,
                                   int nelr){
   //const int i = (blockDim.x*blockIdx.x + threadIdx.x);
   const int i = get_global_id(0);
@@ -36,10 +35,10 @@ __kernel void compute_step_factor(__global float* RESTRICT variables,
 }
 
 __kernel void time_step(int j, int nelr, 
-                        __global float* RESTRICT old_variables, 
-                        __global float* RESTRICT variables, 
-                        __global float* RESTRICT step_factors, 
-                        __global float* RESTRICT fluxes){
+                        __global float* restrict old_variables, 
+                        __global float* restrict variables, 
+                        __global float* restrict step_factors, 
+                        __global float* restrict fluxes){
   //const int i = (blockDim.x*blockIdx.x + threadIdx.x);
   const int i = get_global_id(0);
   if( i >= nelr) return;
@@ -56,11 +55,11 @@ __kernel void time_step(int j, int nelr,
 
 __kernel void compute_flux_contributions(
     int nelr,
-    __global float* RESTRICT variables,
-    __global float* RESTRICT fc_momentum_x,
-    __global float* RESTRICT fc_momentum_y,
-    __global float* RESTRICT fc_momentum_z,
-    __global float* RESTRICT fc_density_energy) {
+    __global float* restrict variables,
+    __global float* restrict fc_momentum_x,
+    __global float* restrict fc_momentum_y,
+    __global float* restrict fc_momentum_z,
+    __global float* restrict fc_density_energy) {
   const int i = get_global_id(0);  
 
   float density_i = variables[i + VAR_DENSITY*nelr];
@@ -102,19 +101,19 @@ __kernel void compute_flux_contributions(
 }
 
 __kernel void compute_flux(
-    __global int* RESTRICT elements_surrounding_elements, 
-    __global float* RESTRICT normals, 
-    __global float* RESTRICT variables, 
-    __constant float* RESTRICT ff_variable,
-    __global float* RESTRICT fluxes,    
-    __constant FLOAT3* RESTRICT ff_flux_contribution_density_energy,
-    __constant FLOAT3* RESTRICT ff_flux_contribution_momentum_x,
-    __constant FLOAT3* RESTRICT ff_flux_contribution_momentum_y,
-    __constant FLOAT3* RESTRICT ff_flux_contribution_momentum_z,
-    __global float* RESTRICT flux_contribution_momentum_x,
-    __global float* RESTRICT flux_contribution_momentum_y,
-    __global float* RESTRICT flux_contribution_momentum_z,
-    __global float* RESTRICT flux_contribution_density_energy,
+    __global int* restrict elements_surrounding_elements, 
+    __global float* restrict normals, 
+    __global float* restrict variables, 
+    __constant float* restrict ff_variable,
+    __global float* restrict fluxes,    
+    __constant FLOAT3* restrict ff_flux_contribution_density_energy,
+    __constant FLOAT3* restrict ff_flux_contribution_momentum_x,
+    __constant FLOAT3* restrict ff_flux_contribution_momentum_y,
+    __constant FLOAT3* restrict ff_flux_contribution_momentum_z,
+    __global float* restrict flux_contribution_momentum_x,
+    __global float* restrict flux_contribution_momentum_y,
+    __global float* restrict flux_contribution_momentum_z,
+    __global float* restrict flux_contribution_density_energy,
     int nelr){
   const float smoothing_coefficient = (float)(0.2f);
   //const int i = (blockDim.x*blockIdx.x + threadIdx.x);

@@ -4,11 +4,10 @@
 //--date:		24/03/2011
 ============================================================ */
 #include "common.h"
-#include "../common/opencl_kernel_common.h"
 
 //--cambine: omit &
 static inline void compute_velocity(float  density, FLOAT3 momentum,
-                                    FLOAT3* RESTRICT velocity){
+                                    FLOAT3* restrict velocity){
   velocity->x = momentum.x / density;
   velocity->y = momentum.y / density;
   velocity->z = momentum.z / density;
@@ -29,10 +28,10 @@ static inline float compute_speed_of_sound(float density, float pressure){
 static inline void compute_flux_contribution(float density, FLOAT3 momentum,
                                              float density_energy, float pressure,
                                              FLOAT3 velocity,
-                                             FLOAT3* RESTRICT fc_momentum_x,
-                                             FLOAT3* RESTRICT fc_momentum_y,
-                                             FLOAT3* RESTRICT fc_momentum_z,
-                                             FLOAT3* RESTRICT fc_density_energy)
+                                             FLOAT3* restrict fc_momentum_x,
+                                             FLOAT3* restrict fc_momentum_y,
+                                             FLOAT3* restrict fc_momentum_z,
+                                             FLOAT3* restrict fc_density_energy)
 {
   fc_momentum_x->x = velocity.x*momentum.x + pressure;
   fc_momentum_x->y = velocity.x*momentum.y;
@@ -54,9 +53,9 @@ static inline void compute_flux_contribution(float density, FLOAT3 momentum,
 }
 
 __attribute__((reqd_work_group_size(BSIZE,1,1)))
-__kernel void compute_step_factor(__global float* RESTRICT variables, 
-                                  __global float* RESTRICT areas, 
-                                  __global float* RESTRICT step_factors,
+__kernel void compute_step_factor(__global float* restrict variables, 
+                                  __global float* restrict areas, 
+                                  __global float* restrict step_factors,
                                   int nelr){
   //const int i = (blockDim.x*blockIdx.x + threadIdx.x);
   const int i = get_global_id(0);
@@ -84,15 +83,15 @@ __kernel void compute_step_factor(__global float* RESTRICT variables,
 
 __attribute__((reqd_work_group_size(BSIZE,1,1)))
 __kernel void compute_flux(
-    __global int* RESTRICT elements_surrounding_elements, 
-    __global float* RESTRICT normals, 
-    __global float* RESTRICT variables, 
-    __constant float* RESTRICT ff_variable,
-    __global float* RESTRICT fluxes,
-    __constant FLOAT3* RESTRICT ff_flux_contribution_density_energy,
-    __constant FLOAT3* RESTRICT ff_flux_contribution_momentum_x,
-    __constant FLOAT3* RESTRICT ff_flux_contribution_momentum_y,
-    __constant FLOAT3* RESTRICT ff_flux_contribution_momentum_z,
+    __global int* restrict elements_surrounding_elements, 
+    __global float* restrict normals, 
+    __global float* restrict variables, 
+    __constant float* restrict ff_variable,
+    __global float* restrict fluxes,
+    __constant FLOAT3* restrict ff_flux_contribution_density_energy,
+    __constant FLOAT3* restrict ff_flux_contribution_momentum_x,
+    __constant FLOAT3* restrict ff_flux_contribution_momentum_y,
+    __constant FLOAT3* restrict ff_flux_contribution_momentum_z,
     int nelr){
   const float smoothing_coefficient = (float)(0.2f);
   //const int i = (blockDim.x*blockIdx.x + threadIdx.x);
@@ -231,10 +230,10 @@ __kernel void compute_flux(
 
 __attribute__((reqd_work_group_size(BSIZE,1,1)))
 __kernel void time_step(int j, int nelr, 
-                        __global float* RESTRICT old_variables, 
-                        __global float* RESTRICT variables, 
-                        __global float* RESTRICT step_factors, 
-                        __global float* RESTRICT fluxes){
+                        __global float* restrict old_variables, 
+                        __global float* restrict variables, 
+                        __global float* restrict step_factors, 
+                        __global float* restrict fluxes){
   //const int i = (blockDim.x*blockIdx.x + threadIdx.x);
   const int i = get_global_id(0);
   if( i >= nelr) return;

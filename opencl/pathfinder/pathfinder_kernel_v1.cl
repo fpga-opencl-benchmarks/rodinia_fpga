@@ -1,10 +1,8 @@
-#include "../common/opencl_kernel_common.h"
-
 #define MIN(a, b) ((a)<=(b) ? (a) : (b))
 
-__kernel void dynproc_kernel (__global int* RESTRICT wall,
-                              __global int* RESTRICT src,
-                              __global int* RESTRICT dst,
+__kernel void dynproc_kernel (__global int* restrict wall,
+                              __global int* restrict src,
+                              __global int* restrict dst,
                                        int  cols,
                                        int  t)
 {
@@ -15,11 +13,10 @@ __kernel void dynproc_kernel (__global int* RESTRICT wall,
 		{
 			min = MIN(min, src[n - 1]);
 		}
-		if (n < cols-1)
+		if (n < cols - 1)
 		{
 			min = MIN(min, src[n + 1]);
 		}
 		dst[n] = wall[(t + 1) * cols + n] + min;
 	}
-
 }

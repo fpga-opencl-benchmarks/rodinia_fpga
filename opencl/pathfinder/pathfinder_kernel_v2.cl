@@ -1,57 +1,53 @@
-#include "../common/opencl_kernel_common.h"
+#include "pathfinder_common.h"
 
 #define IN_RANGE(x, min, max) ((x)>=(min) && (x)<=(max))
 #define CLAMP_RANGE(x, min, max) x = (x<(min)) ? min : ((x>(max)) ? max : x )
 #define MIN(a, b) ((a)<=(b) ? (a) : (b))
 
-#define BLOCK_SIZE 256
 #define HALO 1
 
-#if ALTERA_CL
-	#define ALTERA_ATTRIB __attribute__((local_mem_size(sizeof(int) * BLOCK_SIZE)))
-#else
-	#define ALTERA_ATTRIB
-#endif
-
-#ifndef SIMD_LANES
-	#define SIMD_LANES 16
+#ifndef SSIZE
+	#define SSIZE 16
 #endif
 	
-#ifndef COMPUTE_UNITS
-	#define COMPUTE_UNITS 2
+#ifndef CU
+	#define CU 2
 #endif
 
-__attribute__((reqd_work_group_size(BLOCK_SIZE,1,1)))
-__attribute__((num_simd_work_items(SIMD_LANES)))
-__attribute__((num_compute_units(COMPUTE_UNITS)))
-__kernel void dynproc_kernel (         int           pyramid_height,
-                              __global int* RESTRICT gpuWall,
-                              __global int* RESTRICT gpuSrc,
-                              __global int* RESTRICT gpuResults,
+#ifndef UNROLL
+	#define UNROLL 1
+#endif
+
+__attribute__((reqd_work_group_size(BSIZE,1,1)))
+__attribute__((num_simd_work_items(SSIZE)))
+__attribute__((num_compute_units(CU)))
+__kernel void dynproc_kernel (         int           iteration,
+                              __global int* restrict gpuWall,
+                              __global int* restrict gpuSrc,
+                              __global int* restrict gpuResults,
                                        int           cols,
-                                       int           rows,
                                        int           startStep,
-                                       int           border,
-                ALTERA_ATTRIB __local  int* RESTRICT prev,
-                ALTERA_ATTRIB __local  int* RESTRICT result)
+                                       int           border)
 {
 	int bx = get_group_id(0);
 	int tx = get_local_id(0);
+	
+	// local buffers
+	__local int prev[BSIZE];
+	__local int result[BSIZE];
 
 	// Each block finally computes result for a small block
 	// after N iterations.
 	// it is the non-overlapping small blocks that cover
 	// all the input data
 	
-	int iteration = MIN(pyramid_height, rows - startStep - 1);
-
 	// calculate the small block size.
-	int small_block_cols = BLOCK_SIZE - (iteration * HALO * 2);
+	int small_block_cols = BSIZE - (iteration * HALO * 2);
 
 	// calculate the boundary for the block according to
 	// the boundary of its small block
 	int blkX = (small_block_cols * bx) - border;
-	int blkXmax = blkX + BLOCK_SIZE - 1;
+	int blkXmax = blkX + BSIZE - 1;
 
 	// calculate the global thread coordination
 	int xidx = blkX + tx;
@@ -60,7 +56,7 @@ __kernel void dynproc_kernel (         int           pyramid_height,
 	// the valid range of the input data
 	// used to rule out computation outside the boundary.
 	int validXmin = (blkX < 0) ? -blkX : 0;
-	int validXmax = (blkXmax > cols-1) ? BLOCK_SIZE - 1 - (blkXmax - cols + 1) : BLOCK_SIZE - 1;
+	int validXmax = (blkXmax > cols-1) ? BSIZE - 1 - (blkXmax - cols + 1) : BSIZE - 1;
 	
 	int W = tx - 1;
 	int E = tx + 1;
@@ -78,11 +74,12 @@ __kernel void dynproc_kernel (         int           pyramid_height,
 	barrier(CLK_LOCAL_MEM_FENCE);
 
 	bool computed;
+	#pragma unroll UNROLL
 	for (int i = 0; i < iteration; i++)
 	{
 		computed = false;
 		
-		if( IN_RANGE(tx, i + 1, BLOCK_SIZE - i - 2) && isValid )
+		if( IN_RANGE(tx, i + 1, BSIZE - i - 2) && isValid )
 		{
 			computed = true;
 			int left = prev[W];
@@ -120,7 +117,3 @@ __kernel void dynproc_kernel (         int           pyramid_height,
 		gpuResults[xidx] = result[tx];
 	}
 }
-
-
-
-

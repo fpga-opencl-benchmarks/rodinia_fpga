@@ -1,1 +1,0 @@
-numactl -N 0 -m 0 ./needle 2048 10 8

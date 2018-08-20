@@ -20,7 +20,7 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <assert.h>
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
 	#include "../../../common/power_fpga.h"
 #endif
 
@@ -120,33 +120,29 @@ static struct option long_options[] = {
 
 int main ( int argc, char *argv[] )
 {
-	int block_size = 16; // default block size
 	int matrix_dim = 32; // default matrix dimension
 	int opt, option_index=0;
 	func_ret_t ret;
 	const char *input_file = NULL;
 	float *m, *mm;
-	int i, version;
+	int version;
 	TimeStamp start, end;
 	double totalTime;
 
 #ifdef PROFILE
 	TimeStamp start1, end1;
+	double diatotal = 0, peritotal = 0, intertotal = 0;
 #endif
 	size_t globalwork2, globalwork3;
 
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-	// power measurement parameters, only for Bittware's A10PL4 board
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+	// power measurement parameters, only for Bittware and Nallatech's Arria 10 boards
 	int flag = 0;
 	double power = 0;
 	double energy = 0;
 #endif
 
 	cl_kernel diagonal = NULL, perimeter = NULL, internal = NULL;	// for NDRange kernels
-	cl_kernel perimeter_row = NULL, perimeter_col = NULL;		// for v8
-	cl_kernel lud = NULL;						// for single work-item kernels
-
-	cl_event dia_exec, peri_col_exec;				// events for v8
 
 	// get kernel version from commandline
 	init_fpga(&argc, &argv, &version);
@@ -166,9 +162,6 @@ int main ( int argc, char *argv[] )
 				matrix_dim = atoi(optarg);
 				printf("Generate input matrix internally, size =%d\n", matrix_dim);
 				break;
-			case 'b':
-				block_size = atoi(optarg);
-				break;
 			case '?':
 				fprintf(stderr, "invalid option\n");
 				break;
@@ -176,7 +169,7 @@ int main ( int argc, char *argv[] )
 				fprintf(stderr, "missing argument\n");
 				break;
 			default:
-				fprintf(stderr, "Usage: %s [-v] [-s matrix_size|-i input_file] [-b block_size]\n", argv[0]);
+				fprintf(stderr, "Usage: %s [-v] [-s matrix_size|-i input_file]\n", argv[0]);
 				exit(EXIT_FAILURE);
 		}
 	}
@@ -211,7 +204,7 @@ int main ( int argc, char *argv[] )
 		exit(EXIT_FAILURE);
 	}
 
-	printf("WG size of kernel = %d X %d\n", block_size, block_size);
+	printf("WG size of kernel = %d X %d\n", BSIZE, BSIZE);
 
 	if (do_verify){
 		//printf("Before LUD\n");
@@ -247,293 +240,247 @@ int main ( int argc, char *argv[] )
 	}
 #if defined(USE_JIT)
 	char clOptions[110];
-	sprintf(clOptions, "-I. -DBSIZE=%d", block_size);
+	sprintf(clOptions, "-I./ocl -DBSIZE=%d", BSIZE);
 	clBuildProgram_SAFE(prog, num_devices, device_list, clOptions, NULL, NULL);
 #endif // USE_JIT        
 
 	cl_mem d_m;
-	d_m = clCreateBuffer(context, CL_MEM_READ_WRITE, matrix_dim*matrix_dim * sizeof(float), NULL, &err );
-	if(err != CL_SUCCESS) { printf("ERROR: clCreateBuffer d_m (size:%d) => %d\n", matrix_dim*matrix_dim, err); return -1;} 
+	d_m = clCreateBuffer(context, CL_MEM_READ_WRITE, matrix_dim * matrix_dim * sizeof(float), NULL, &err );
+	if(err != CL_SUCCESS) { printf("ERROR: clCreateBuffer d_m (size:%d) => %d\n", matrix_dim * matrix_dim, err); return -1;} 
 
-	CL_SAFE_CALL(clEnqueueWriteBuffer(cmd_queue, d_m, 1, 0, matrix_dim*matrix_dim*sizeof(float), m, 0, 0, 0));
+	CL_SAFE_CALL(clEnqueueWriteBuffer(cmd_queue, d_m, 1, 0, matrix_dim * matrix_dim * sizeof(float), m, 0, 0, 0));
 
-	if (version == 5)						// single-kernel version
+	// create kernels
+	diagonal = clCreateKernel(prog, "lud_diagonal", &err);
+	if(err != CL_SUCCESS) { printf("ERROR: clCreateKernel(diagonal) 0 => %d\n", err); return -1; }
+	perimeter = clCreateKernel(prog, "lud_perimeter", &err);
+	if(err != CL_SUCCESS) { printf("ERROR: clCreateKernel(perimeter) 0 => %d\n", err); return -1; }
+	internal = clCreateKernel(prog, "lud_internal", &err);  
+	if(err != CL_SUCCESS) { printf("ERROR: clCreateKernel(internal) 0 => %d\n", err); return -1; }
+	clReleaseProgram(prog); 
+
+	// set fixed kernel arguments
+	CL_SAFE_CALL( clSetKernelArg(diagonal, 0, sizeof(void *), (void*) &d_m       ) );
+	CL_SAFE_CALL( clSetKernelArg(diagonal, 1, sizeof(cl_int), (void*) &matrix_dim) );
+	
+	CL_SAFE_CALL( clSetKernelArg(perimeter, 0, sizeof(void *), (void*) &d_m       ) );
+	CL_SAFE_CALL( clSetKernelArg(perimeter, 1, sizeof(cl_int), (void*) &matrix_dim) );
+	
+	CL_SAFE_CALL( clSetKernelArg(internal, 0, sizeof(void *), (void*) &d_m       ) );
+	CL_SAFE_CALL( clSetKernelArg(internal, 1, sizeof(cl_int), (void*) &matrix_dim) );
+	
+	// fixed work sizes
+	size_t global_work1[3] = {(size_t)BSIZE, 1, 1};
+	size_t local_work1[3]  = {(size_t)BSIZE, 1, 1};
+
+	size_t local_work2[3]  = {(size_t)BSIZE * 2, 1, 1};
+
+	size_t local_work3[3]  = {(size_t)BSIZE, (size_t)BSIZE, 1};
+
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+	#pragma omp parallel num_threads(2) shared(flag)
 	{
-		lud = clCreateKernel(prog, "lud", &err);
-		if(err != CL_SUCCESS) { printf("ERROR: clCreateKernel() 0 => %d\n", err); return -1; }
-		clReleaseProgram(prog);
-
-		CL_SAFE_CALL( clSetKernelArg(lud, 0, sizeof(void *), (void*) &d_m       ) );
-		CL_SAFE_CALL( clSetKernelArg(lud, 1, sizeof(cl_int), (void*) &matrix_dim) );
-
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-		#pragma omp parallel num_threads(2) shared(flag)
+		if (omp_get_thread_num() == 0)
 		{
-			if (omp_get_thread_num() == 0)
-			{
+			#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115
 				power = GetPowerFPGA(&flag);
-			}
-			else
-			{
-				#pragma omp barrier
-#endif
-				// beginning of timing point
-				GetTime(start);
-
-				CL_SAFE_CALL( clEnqueueTask(cmd_queue, lud, 0, NULL, NULL) );
-				clFinish(cmd_queue);
-
-				// end of timing point
-				GetTime(end);
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-				flag = 1;
-			}
-		}
-#endif
-	}
-	else
-	{
-		diagonal  = clCreateKernel(prog, "lud_diagonal", &err);
-		if (version == 8)
-		{
-			perimeter_row = clCreateKernel(prog, "lud_perimeter_row", &err);
-			perimeter_col = clCreateKernel(prog, "lud_perimeter_col", &err);
+			#else
+				power = GetPowerFPGA(&flag, device_list);
+			#endif
 		}
 		else
 		{
-			perimeter = clCreateKernel(prog, "lud_perimeter", &err);
-		}
-		internal  = clCreateKernel(prog, "lud_internal", &err);  
-		if(err != CL_SUCCESS) { printf("ERROR: clCreateKernel() 0 => %d\n", err); return -1; }
-		clReleaseProgram(prog); 
-
-		if (!is_ndrange_kernel(version) || version >= 4)
-		{
-			// fixed kernel arguments
-			CL_SAFE_CALL( clSetKernelArg(diagonal,  0, sizeof(void *),                      (void*) &d_m       ) );
-			CL_SAFE_CALL( clSetKernelArg(diagonal,  1, sizeof(cl_int),                      (void*) &matrix_dim) );
-			
-			if (version == 8)
-			{
-				CL_SAFE_CALL( clSetKernelArg(perimeter_row, 0, sizeof(void *),          (void*) &d_m       ) );
-				CL_SAFE_CALL( clSetKernelArg(perimeter_row, 1, sizeof(cl_int),          (void*) &matrix_dim) );
-			
-				CL_SAFE_CALL( clSetKernelArg(perimeter_col, 0, sizeof(void *),          (void*) &d_m       ) );
-				CL_SAFE_CALL( clSetKernelArg(perimeter_col, 1, sizeof(cl_int),          (void*) &matrix_dim) );
-			}
-			else
-			{
-				CL_SAFE_CALL( clSetKernelArg(perimeter, 0, sizeof(void *),              (void*) &d_m       ) );
-				CL_SAFE_CALL( clSetKernelArg(perimeter, 1, sizeof(cl_int),              (void*) &matrix_dim) );
-			}
-			
-			CL_SAFE_CALL( clSetKernelArg(internal,  0, sizeof(void *),                      (void*) &d_m       ) );
-			CL_SAFE_CALL( clSetKernelArg(internal,  1, sizeof(cl_int),                      (void*) &matrix_dim) );
-		}
-		else
-		{
-			// fixed kernel arguments
-			CL_SAFE_CALL( clSetKernelArg(diagonal,  0, sizeof(void *),                      (void*) &d_m       ) );
-			CL_SAFE_CALL( clSetKernelArg(diagonal,  1, sizeof(float)*block_size*block_size, (void*) NULL       ) );
-			CL_SAFE_CALL( clSetKernelArg(diagonal,  2, sizeof(cl_int),                      (void*) &matrix_dim) );
-			
-			CL_SAFE_CALL( clSetKernelArg(perimeter, 0, sizeof(void *),                      (void*) &d_m       ) );
-			CL_SAFE_CALL( clSetKernelArg(perimeter, 1, sizeof(float)*block_size*block_size, (void*) NULL       ) );
-			CL_SAFE_CALL( clSetKernelArg(perimeter, 2, sizeof(float)*block_size*block_size, (void*) NULL       ) );
-			CL_SAFE_CALL( clSetKernelArg(perimeter, 3, sizeof(float)*block_size*block_size, (void*) NULL       ) );
-			CL_SAFE_CALL( clSetKernelArg(perimeter, 4, sizeof(cl_int),                      (void*) &matrix_dim) );
-			
-			CL_SAFE_CALL( clSetKernelArg(internal,  0, sizeof(void *),                      (void*) &d_m       ) );
-			CL_SAFE_CALL( clSetKernelArg(internal,  1, sizeof(float)*block_size*block_size, (void*) NULL       ) );
-			CL_SAFE_CALL( clSetKernelArg(internal,  2, sizeof(float)*block_size*block_size, (void*) NULL       ) );
-			CL_SAFE_CALL( clSetKernelArg(internal,  3, sizeof(cl_int),                      (void*) &matrix_dim) );
-		}
-		
-		// fixed work sizes
-		size_t global_work1[3] = {(size_t)block_size, 1, 1};
-		size_t local_work1[3]  = {(size_t)block_size, 1, 1};
-
-		size_t peri_work_size  = (version == 8) ? (size_t)block_size : (size_t)block_size * 2;
-		size_t local_work2[3]  = {peri_work_size, 1, 1};
-
-		size_t local_work3[3]  = {(size_t)block_size, (size_t)block_size, 1};
-
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-		#pragma omp parallel num_threads(2) shared(flag)
-		{
-			if (omp_get_thread_num() == 0)
-			{
-				power = GetPowerFPGA(&flag);
-			}
-			else
-			{
-				#pragma omp barrier
+			#pragma omp barrier
 #endif
-				// beginning of timing point
-				GetTime(start);
-				for (i = 0; i < matrix_dim - block_size; i += block_size)
+			// beginning of timing point
+			GetTime(start);
+
+			for (int i = 0; i < matrix_dim - BSIZE; i += BSIZE)
+			{
+				if (version == 4)
 				{
-					if (!is_ndrange_kernel(version) || version >= 4)
-					{
-						CL_SAFE_CALL( clSetKernelArg(diagonal , 2, sizeof(cl_int), (void*) &i) );
-						if (version == 8)
-						{
-							CL_SAFE_CALL( clSetKernelArg(perimeter_row, 2, sizeof(cl_int), (void*) &i) );
-							CL_SAFE_CALL( clSetKernelArg(perimeter_col, 2, sizeof(cl_int), (void*) &i) );
-						}
-						else
-						{
-							CL_SAFE_CALL( clSetKernelArg(perimeter, 2, sizeof(cl_int), (void*) &i) );
-						}
-						CL_SAFE_CALL( clSetKernelArg(internal , 2, sizeof(cl_int), (void*) &i) );
-					}
-					else
-					{
-						CL_SAFE_CALL( clSetKernelArg(diagonal , 3, sizeof(cl_int), (void*) &i) );
-						CL_SAFE_CALL( clSetKernelArg(perimeter, 5, sizeof(cl_int), (void*) &i) );
-						CL_SAFE_CALL( clSetKernelArg(internal , 4, sizeof(cl_int), (void*) &i) );
-					}
-					
-					globalwork2 = peri_work_size * (((matrix_dim-i)/block_size) - 1);
-					globalwork3 = block_size * (((matrix_dim-i)/block_size) - 1);
-					
-					size_t global_work2[3] = {globalwork2, 1, 1};
-					size_t global_work3[3] = {globalwork3, globalwork3, 1};
-
-					if (is_ndrange_kernel(version))
-					{
-						#ifdef PROFILE
-						GetTime(start1);
-						#endif
-						
-						CL_SAFE_CALL( clEnqueueNDRangeKernel(cmd_queue, diagonal , 2, NULL, global_work1, local_work1, 0, 0, &dia_exec) );
-						
-						#ifdef PROFILE
-						clFinish(cmd_queue);
-						GetTime(end1);
-						printf("%d: diameter: %f\n", i, TimeDiff(start1, end1));
-						#endif
-
-						#ifdef PROFILE
-						GetTime(start1);
-						#endif
-						
-						if (version == 8)
-						{
-							CL_SAFE_CALL( clEnqueueNDRangeKernel(cmd_queue, perimeter_row, 2, NULL, global_work2, local_work2, 0, 0, 0) );
-							//clFinish(cmd_queue);
-							//GetTime(end1);
-							//printf("%d: peri_row: %f\n", i, TimeDiff(start1, end1));
-							//GetTime(start1);
-							CL_SAFE_CALL( clEnqueueNDRangeKernel(cmd_queue2, perimeter_col, 2, NULL, global_work2, local_work2, 1, &dia_exec, &peri_col_exec) );
-						}
-						else
-						{
-							CL_SAFE_CALL( clEnqueueNDRangeKernel(cmd_queue, perimeter, 2, NULL, global_work2, local_work2, 0, 0, 0) );
-						}
-						
-						#ifdef PROFILE
-						clFinish(cmd_queue);
-						clFinish(cmd_queue2);
-						GetTime(end1);
-						printf("%d: perimete: %f\n", i, TimeDiff(start1, end1));
-						#endif
-
-						#ifdef PROFILE
-						GetTime(start1);
-						#endif
-
-						if (version == 8)
-						{
-							CL_SAFE_CALL( clEnqueueNDRangeKernel(cmd_queue, internal , 2, NULL, global_work3, local_work3, 1, &peri_col_exec, 0) );
-						}
-						else
-						{
-							CL_SAFE_CALL( clEnqueueNDRangeKernel(cmd_queue, internal , 2, NULL, global_work3, local_work3, 0, 0, 0) );
-						}
-						
-						#ifdef PROFILE
-						clFinish(cmd_queue);
-						GetTime(end1);
-						printf("%d: internal: %f\n\n", i, TimeDiff(start1, end1));
-						#endif
-					}
-					else
-					{
-						#ifdef PROFILE
-						GetTime(start1);
-						#endif
-						
-						CL_SAFE_CALL( clEnqueueTask(cmd_queue, diagonal , 0, NULL, NULL) );
-						
-						#ifdef PROFILE
-						clFinish(cmd_queue);
-						GetTime(end1);
-						printf("%d: diameter: %f\n", i, TimeDiff(start1, end1));
-						#endif
-
-						#ifdef PROFILE
-						GetTime(start1);
-						#endif
-						
-						CL_SAFE_CALL( clEnqueueTask(cmd_queue, perimeter, 0, NULL, NULL) );
-						
-						#ifdef PROFILE
-						clFinish(cmd_queue);
-						GetTime(end1);
-						printf("%d: perimete: %f\n", i, TimeDiff(start1, end1));
-						#endif
-
-						#ifdef PROFILE
-						GetTime(start1);
-						#endif
-						
-						CL_SAFE_CALL( clEnqueueTask(cmd_queue, internal , 0, NULL, NULL) );
-						
-						#ifdef PROFILE
-						clFinish(cmd_queue);
-						GetTime(end1);
-						printf("%d: internal: %f\n\n", i, TimeDiff(start1, end1));
-						#endif
-					}
-				}
-
-				if (!is_ndrange_kernel(version) || version >= 4)
-				{
-					CL_SAFE_CALL( clSetKernelArg(diagonal, 2, sizeof(cl_int), (void*) &i) );
+					int offset = i * matrix_dim + i;
+					CL_SAFE_CALL( clSetKernelArg(diagonal , 2, sizeof(cl_int), (void*) &offset) );
+					CL_SAFE_CALL( clSetKernelArg(perimeter, 2, sizeof(cl_int), (void*) &offset) );
+					CL_SAFE_CALL( clSetKernelArg(internal , 2, sizeof(cl_int), (void*) &offset) );
 				}
 				else
 				{
-					CL_SAFE_CALL( clSetKernelArg(diagonal, 3, sizeof(cl_int), (void*) &i) );
+					CL_SAFE_CALL( clSetKernelArg(diagonal , 2, sizeof(cl_int), (void*) &i) );
+					CL_SAFE_CALL( clSetKernelArg(perimeter, 2, sizeof(cl_int), (void*) &i) );
+					CL_SAFE_CALL( clSetKernelArg(internal , 2, sizeof(cl_int), (void*) &i) );
 				}
+				
+				globalwork2 = BSIZE * 2 * (((matrix_dim-i)/BSIZE) - 1);
+				globalwork3 = BSIZE * (((matrix_dim-i)/BSIZE) - 1);
+				
+				size_t global_work2[3] = {globalwork2, 1, 1};
+				size_t global_work3[3] = {globalwork3, globalwork3, 1};
 
 				if (is_ndrange_kernel(version))
 				{
-					CL_SAFE_CALL( clEnqueueNDRangeKernel(cmd_queue, diagonal, 2, NULL, global_work1, local_work1, 0, 0, 0) );
+					#ifdef PROFILE
+					GetTime(start1);
+					#endif
+					
+					CL_SAFE_CALL( clEnqueueNDRangeKernel(cmd_queue, diagonal , 2, NULL, global_work1, local_work1, 0, 0, 0) );
+					clFinish(cmd_queue);
+					
+					#ifdef PROFILE
+					GetTime(end1);
+					diatotal += TimeDiff(start1, end1);
+					printf("%d: diameter: %f\n", i, TimeDiff(start1, end1));
+					#endif
+
+					#ifdef PROFILE
+					GetTime(start1);
+					#endif
+					
+					CL_SAFE_CALL( clEnqueueNDRangeKernel(cmd_queue, perimeter, 2, NULL, global_work2, local_work2, 0, 0, 0) );
+					clFinish(cmd_queue);
+					
+					#ifdef PROFILE
+					GetTime(end1);
+					peritotal += TimeDiff(start1, end1);
+					printf("%d: perimete: %f\n", i, TimeDiff(start1, end1));
+					#endif
+
+					#ifdef PROFILE
+					GetTime(start1);
+					#endif
+
+					CL_SAFE_CALL( clEnqueueNDRangeKernel(cmd_queue, internal , 2, NULL, global_work3, local_work3, 0, 0, 0) );
+					clFinish(cmd_queue);
+
+					#ifdef PROFILE
+					GetTime(end1);
+					intertotal += TimeDiff(start1, end1);
+					printf("%d: internal: %f\n\n", i, TimeDiff(start1, end1));
+					#endif
 				}
 				else
 				{
-					CL_SAFE_CALL( clEnqueueTask(cmd_queue, diagonal, 0, NULL, NULL) );
+					#ifdef PROFILE
+					GetTime(start1);
+					#endif
+					
+					CL_SAFE_CALL( clEnqueueTask(cmd_queue, diagonal , 0, NULL, NULL) );
+					clFinish(cmd_queue);
+					
+					#ifdef PROFILE
+					GetTime(end1);
+					diatotal += TimeDiff(start1, end1);
+					printf("%d: diameter: %f\n", i, TimeDiff(start1, end1));
+					#endif
+
+					#ifdef PROFILE
+					GetTime(start1);
+					#endif
+
+					if (version == 1)
+					{
+						CL_SAFE_CALL( clEnqueueTask(cmd_queue, perimeter, 0, NULL, NULL) );
+					}
+					else
+					{
+						int chunk_num = ((matrix_dim - i) / BSIZE) - 1;
+
+						for (int chunk_idx = 0; chunk_idx < chunk_num; chunk_idx++)
+						{
+							int offset = i + BSIZE * (chunk_idx + 1);
+
+							CL_SAFE_CALL( clSetKernelArg(perimeter, 3, sizeof(cl_int), (void*) &offset) );
+
+							CL_SAFE_CALL( clEnqueueTask(cmd_queue, perimeter, 0, NULL, NULL) );
+						}
+					}
+					clFinish(cmd_queue);
+					
+					#ifdef PROFILE
+					GetTime(end1);
+					peritotal += TimeDiff(start1, end1);
+					printf("%d: perimete: %f\n", i, TimeDiff(start1, end1));
+					#endif
+
+					#ifdef PROFILE
+					GetTime(start1);
+					#endif
+
+					if (version == 1)
+					{
+						CL_SAFE_CALL( clEnqueueTask(cmd_queue, internal, 0, NULL, NULL) );
+					}
+					else
+					{
+						int chunk_num = ((matrix_dim - i) / BSIZE) - 1;
+
+						for  (int chunk_idx = 0; chunk_idx < chunk_num * chunk_num; chunk_idx++)
+						{
+							int i_global = i + BSIZE * (1 + chunk_idx / chunk_num);
+							int j_global = i + BSIZE * (1 + chunk_idx % chunk_num);
+
+							CL_SAFE_CALL( clSetKernelArg(internal, 3, sizeof(cl_int), (void*) &i_global) );
+							CL_SAFE_CALL( clSetKernelArg(internal, 4, sizeof(cl_int), (void*) &j_global) );
+
+							CL_SAFE_CALL( clEnqueueTask(cmd_queue, internal, 0, NULL, NULL) );
+						}
+					}
+					clFinish(cmd_queue);
+
+					#ifdef PROFILE
+					GetTime(end1);
+					intertotal += TimeDiff(start1, end1);
+					printf("%d: internal: %f\n\n", i, TimeDiff(start1, end1));
+					#endif
 				}
-
-				clFinish(cmd_queue);
-				// end of timing point
-				GetTime(end);
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-				flag = 1;
 			}
-		}
-#endif
-	}
 
-	CL_SAFE_CALL( clEnqueueReadBuffer(cmd_queue, d_m, 1, 0, matrix_dim*matrix_dim*sizeof(float), m, 0, 0, 0) );
+			#ifdef PROFILE
+			GetTime(start1);
+			#endif
+
+			int offset = (version == 4) ? (matrix_dim - BSIZE) * matrix_dim + (matrix_dim - BSIZE) : matrix_dim - BSIZE;
+			CL_SAFE_CALL( clSetKernelArg(diagonal, 2, sizeof(cl_int), (void*) &offset) );
+
+			if (is_ndrange_kernel(version))
+			{
+				CL_SAFE_CALL( clEnqueueNDRangeKernel(cmd_queue, diagonal, 2, NULL, global_work1, local_work1, 0, 0, 0) );
+			}
+			else
+			{
+				CL_SAFE_CALL( clEnqueueTask(cmd_queue, diagonal, 0, NULL, NULL) );
+			}
+
+			clFinish(cmd_queue);
+
+			#ifdef PROFILE
+			GetTime(end1);
+			diatotal += TimeDiff(start1, end1);
+			printf("%d: diameter: %f\n", matrix_dim, TimeDiff(start1, end1));
+			#endif
+
+			// end of timing point
+			GetTime(end);
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
+			flag = 1;
+		}
+	}
+#endif
+
+	CL_SAFE_CALL( clEnqueueReadBuffer(cmd_queue, d_m, 1, 0, matrix_dim * matrix_dim * sizeof(float), m, 0, 0, 0) );
 	clFinish(cmd_queue);
 	clReleaseMemObject(d_m);
+
+	#ifdef PROFILE
+	printf("\ntotal: diameter: %0.3lf\n", diatotal);
+	printf("total: perimete: %0.3lf\n", peritotal);
+	printf("total: internal: %0.3lf\n\n", intertotal);
+	#endif
 
 	totalTime = TimeDiff(start, end);
 	printf("Computation done in %0.3lf ms.\n", totalTime);
 
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
+#if defined(AOCL_BOARD_a10pl4_dd4gb_gx115) || defined(AOCL_BOARD_p385a_sch_ax115)
 	energy = GetEnergyFPGA(power, totalTime);
 	if (power != -1) // -1 --> failed to read energy values
 	{

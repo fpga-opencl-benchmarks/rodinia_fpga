@@ -1,16 +1,15 @@
 #include "common.h"
 #include "kernel_common.h"
-#include "../common/opencl_kernel_common.h"
 
 #define shift_reg
 
-__kernel void compute_step_factor(__global float* RESTRICT v_density,
-                                  __global float* RESTRICT v_momentum_x,
-                                  __global float* RESTRICT v_momentum_y,
-                                  __global float* RESTRICT v_momentum_z,
-                                  __global float* RESTRICT v_energy,
-                                  __global float* RESTRICT areas, 
-                                  __global float* RESTRICT step_factors,
+__kernel void compute_step_factor(__global float* restrict v_density,
+                                  __global float* restrict v_momentum_x,
+                                  __global float* restrict v_momentum_y,
+                                  __global float* restrict v_momentum_z,
+                                  __global float* restrict v_energy,
+                                  __global float* restrict areas, 
+                                  __global float* restrict step_factors,
                                   int nelr){
   for (int i = 0; i < nelr; ++i) {
 
@@ -36,23 +35,23 @@ __kernel void compute_step_factor(__global float* RESTRICT v_density,
 }
 
 __kernel void compute_flux(
-    __global int* RESTRICT elements_surrounding_elements, 
-    __global float* RESTRICT normals, 
-    __global float* RESTRICT v_density,
-    __global float* RESTRICT v_momentum_x,
-    __global float* RESTRICT v_momentum_y,
-    __global float* RESTRICT v_momentum_z,
-    __global float* RESTRICT v_energy,
-    __constant float* RESTRICT ff_variable,
-    __global float* RESTRICT fluxes_density,
-    __global float* RESTRICT fluxes_momentum_x,
-    __global float* RESTRICT fluxes_momentum_y,
-    __global float* RESTRICT fluxes_momentum_z,
-    __global float* RESTRICT fluxes_energy,
-    __constant FLOAT3* RESTRICT ff_flux_contribution_density_energy,
-    __constant FLOAT3* RESTRICT ff_flux_contribution_momentum_x,
-    __constant FLOAT3* RESTRICT ff_flux_contribution_momentum_y,
-    __constant FLOAT3* RESTRICT ff_flux_contribution_momentum_z,
+    __global int* restrict elements_surrounding_elements, 
+    __global float* restrict normals, 
+    __global float* restrict v_density,
+    __global float* restrict v_momentum_x,
+    __global float* restrict v_momentum_y,
+    __global float* restrict v_momentum_z,
+    __global float* restrict v_energy,
+    __constant float* restrict ff_variable,
+    __global float* restrict fluxes_density,
+    __global float* restrict fluxes_momentum_x,
+    __global float* restrict fluxes_momentum_y,
+    __global float* restrict fluxes_momentum_z,
+    __global float* restrict fluxes_energy,
+    __constant FLOAT3* restrict ff_flux_contribution_density_energy,
+    __constant FLOAT3* restrict ff_flux_contribution_momentum_x,
+    __constant FLOAT3* restrict ff_flux_contribution_momentum_y,
+    __constant FLOAT3* restrict ff_flux_contribution_momentum_z,
     int nelr){
   const float smoothing_coefficient = 0.2f;
 
@@ -217,22 +216,22 @@ __kernel void compute_flux(
 }
 
 __kernel void time_step(int j, int nelr, 
-                        __global float* RESTRICT old_v_density,
-                        __global float* RESTRICT old_v_momentum_x,
-                        __global float* RESTRICT old_v_momentum_y,
-                        __global float* RESTRICT old_v_momentum_z,
-                        __global float* RESTRICT old_v_energy,                        
-                        __global float* RESTRICT v_density,
-                        __global float* RESTRICT v_momentum_x,
-                        __global float* RESTRICT v_momentum_y,
-                        __global float* RESTRICT v_momentum_z,
-                        __global float* RESTRICT v_energy,
-                        __global float* RESTRICT step_factors, 
-                        __global float* RESTRICT fluxes_density,
-                        __global float* RESTRICT fluxes_momentum_x,
-                        __global float* RESTRICT fluxes_momentum_y,
-                        __global float* RESTRICT fluxes_momentum_z,
-                        __global float* RESTRICT fluxes_energy) {
+                        __global float* restrict old_v_density,
+                        __global float* restrict old_v_momentum_x,
+                        __global float* restrict old_v_momentum_y,
+                        __global float* restrict old_v_momentum_z,
+                        __global float* restrict old_v_energy,                        
+                        __global float* restrict v_density,
+                        __global float* restrict v_momentum_x,
+                        __global float* restrict v_momentum_y,
+                        __global float* restrict v_momentum_z,
+                        __global float* restrict v_energy,
+                        __global float* restrict step_factors, 
+                        __global float* restrict fluxes_density,
+                        __global float* restrict fluxes_momentum_x,
+                        __global float* restrict fluxes_momentum_y,
+                        __global float* restrict fluxes_momentum_z,
+                        __global float* restrict fluxes_energy) {
   for (int i = 0; i < nelr; ++i) {
     float factor = step_factors[i]/(float)(RK+1-j);
 

@@ -78,7 +78,7 @@ void OpenCL::createKernel(string kernelName)
 	kernelArray[kernelName] = kernel;
 	
 	// Get the kernel work group size.
-/*#if !defined(ALTERA_CL)
+/*#if !defined(ALTERA)
 	CL_SAFE_CALL(clGetKernelWorkGroupInfo(kernelArray[kernelName], device_id[0], CL_KERNEL_WORK_GROUP_SIZE, sizeof(size_t), &lwsize, NULL));
 	if (lwsize == 0)
 	{

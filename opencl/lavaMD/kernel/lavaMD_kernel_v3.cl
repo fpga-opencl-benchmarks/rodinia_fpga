@@ -1,5 +1,3 @@
-#include "../common/opencl_kernel_common.h"
-
 #define FADD_LATENCY 8
 
 #ifndef UNROLL
@@ -71,10 +69,10 @@ typedef struct box_str
 __attribute__((max_global_work_dim(0)))
 __kernel void kernel_gpu_opencl(fp                    alpha,
                                 long                  number_boxes,
-                       __global box_str*     RESTRICT box,
-                       __global FOUR_VECTOR* RESTRICT rv,
-                       __global fp*          RESTRICT qv,
-                       __global FOUR_VECTOR* RESTRICT fv)
+                       __global box_str*     restrict box,
+                       __global FOUR_VECTOR* restrict rv,
+                       __global fp*          restrict qv,
+                       __global FOUR_VECTOR* restrict fv)
 {
 	fp a2=2.0*alpha*alpha;
 

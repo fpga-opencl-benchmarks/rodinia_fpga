@@ -1,9 +1,12 @@
-CC = gcc
-CCFLAGS = -g -fopenmp -O3
-OUTPUT = *.out
+include ../../common/make.config
+
+OUTPUT = output.txt
 
 3D:
-	$(CC) -o 3D $(CCFLAGS) 3D.c -lm 
+	$(CC) -o hotspot3D $(CFLAGS) hotspot3D.c -lm $(OPENMP_INC)
+
+verify:
+	$(CC) -o hotspot3D $(CFLAGS) hotspot3D.c -lm $(OPENMP_INC) -DVERIFY
 
 clean:
-	rm -f 3D $(OUTPUT)
+	rm -f hotspot3D $(OUTPUT)

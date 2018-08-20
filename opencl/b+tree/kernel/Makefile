@@ -29,4 +29,4 @@ kernel_gpu_opencl_altera_v4.aoco: kernel_gpu_opencl_altera_v4.cl \
 	kernel_gpu_opencl_v4.cl	kernel_gpu_opencl_2_v4.cl
 
 clean:
-	$(RM) *.aoco *.aocx $(KERNEL_NAMES)
+	$(RM) *.aoco $(KERNEL_NAMES)

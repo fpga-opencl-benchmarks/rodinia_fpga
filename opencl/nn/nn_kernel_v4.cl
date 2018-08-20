@@ -1,5 +1,4 @@
 //#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
-#include "../common/opencl_kernel_common.h"
 
 typedef struct latLong
 	{
@@ -18,8 +17,8 @@ typedef struct latLong
 __attribute__((reqd_work_group_size(64,1,1)))
 __attribute__((num_simd_work_items(SIMD_LANES)))
 __attribute__((num_compute_units(COMPUTE_UNITS)))
-__kernel void NearestNeighbor(__global LatLong* RESTRICT d_locations,
-			      __global float*   RESTRICT d_distances,
+__kernel void NearestNeighbor(__global LatLong* restrict d_locations,
+			      __global float*   restrict d_distances,
 			      const    int               numRecords,
 			      const    float             lat,
 			      const    float             lng)

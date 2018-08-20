@@ -1,8 +1,6 @@
-long long get_time() {
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	return (tv.tv_sec * 1000000) + tv.tv_usec;
-}
+#include <omp.h>
+#include "../../common/timer.h"
+#include "../../common/power_gpu.h"
 
 __global__ void hotspotOpt1(float *p, float* tIn, float *tOut, float sdc,
         int nx, int ny, int nz,
@@ -27,8 +25,7 @@ __global__ void hotspotOpt1(float *p, float* tIn, float *tOut, float sdc,
     float temp1, temp2, temp3;
     temp1 = temp2 = tIn[c];
     temp3 = tIn[c+xy];
-    tOut[c] = cc * temp2 + cw * tIn[W] + ce * tIn[E] + cs * tIn[S]
-        + cn * tIn[N] + cb * temp1 + ct * temp3 + sdc * p[c] + ct * amb_temp;
+    tOut[c] = cc * temp2 + cn * tIn[N] + cs * tIn[S] + ce * tIn[E] + cw * tIn[W] + ct * temp3 + cb * temp1 + sdc * p[c] + ct * amb_temp;
     c += xy;
     W += xy;
     E += xy;
@@ -39,8 +36,7 @@ __global__ void hotspotOpt1(float *p, float* tIn, float *tOut, float sdc,
         temp1 = temp2;
         temp2 = temp3;
         temp3 = tIn[c+xy];
-        tOut[c] = cc * temp2 + cw * tIn[W] + ce * tIn[E] + cs * tIn[S]
-            + cn * tIn[N] + cb * temp1 + ct * temp3 + sdc * p[c] + ct * amb_temp;
+        tOut[c] = cc * temp2 + cn * tIn[N] + cs * tIn[S] + ce * tIn[E] + cw * tIn[W] + ct * temp3 + cb * temp1 + sdc * p[c] + ct * amb_temp;
         c += xy;
         W += xy;
         E += xy;
@@ -49,8 +45,7 @@ __global__ void hotspotOpt1(float *p, float* tIn, float *tOut, float sdc,
     }
     temp1 = temp2;
     temp2 = temp3;
-    tOut[c] = cc * temp2 + cw * tIn[W] + ce * tIn[E] + cs * tIn[S]
-        + cn * tIn[N] + cb * temp1 + ct * temp3 + sdc * p[c] + ct * amb_temp;
+    tOut[c] = cc * temp2 + cn * tIn[N] + cs * tIn[S] + ce * tIn[E] + cw * tIn[W] + ct * temp3 + cb * temp1 + sdc * p[c] + ct * amb_temp;
     return;
 }
 
@@ -65,6 +60,10 @@ void hotspot_opt1(float *p, float *tIn, float *tOut,
     ce = cw =stepDivCap/ Rx;
     cn = cs =stepDivCap/ Ry;
     ct = cb =stepDivCap/ Rz;
+
+    TimeStamp start, end;
+    double totalTime, power = 0, energy = 0;
+    int flag = 0;
 
     cc = 1.0 - (2.0*ce + 2.0*cn + 3.0*ct);
 
@@ -81,22 +80,47 @@ void hotspot_opt1(float *p, float *tIn, float *tOut,
     dim3 block_dim(64, 4, 1);
     dim3 grid_dim(nx / 64, ny / 4, 1);
 
-    long long start = get_time();
-    for (int i = 0; i < numiter; ++i) {
-        hotspotOpt1<<<grid_dim, block_dim>>>
-            (p_d, tIn_d, tOut_d, stepDivCap, nx, ny, nz, ce, cw, cn, cs, ct, cb, cc);
-        float *t = tIn_d;
-        tIn_d = tOut_d;
-        tOut_d = t;
+    #pragma omp parallel num_threads(2) shared(flag)
+    {
+        if (omp_get_thread_num() == 0)
+        {
+            power = GetPowerGPU(&flag, 0);
+        }
+        else
+        {
+            #pragma omp barrier
+            GetTime(start);
+            for (int i = 0; i < numiter; ++i)
+            {
+                hotspotOpt1<<<grid_dim, block_dim>>>
+                    (p_d, tIn_d, tOut_d, stepDivCap, nx, ny, nz, ce, cw, cn, cs, ct, cb, cc);
+                float *t = tIn_d;
+                tIn_d = tOut_d;
+                tOut_d = t;
+            }
+            cudaDeviceSynchronize();
+            GetTime(end);
+            flag = 1;
+        }
     }
-    cudaDeviceSynchronize();
-    long long stop = get_time();
-    float time = (float)((stop - start)/(1000.0 * 1000.0));
-    printf("Time: %.3f (s)\n",time);
-    cudaMemcpy(tOut, tOut_d, s, cudaMemcpyDeviceToHost);
+
+    // output pointer is always swapped one extra time and hence, tIn_d will point to the correct output 
+    cudaMemcpy(tOut, tIn_d, s, cudaMemcpyDeviceToHost);
+
     cudaFree(p_d);
     cudaFree(tIn_d);
     cudaFree(tOut_d);
+
+    totalTime = TimeDiff(start, end);
+    energy = GetEnergyGPU(power, totalTime);
+    printf("\nComputation done in %0.3lf ms.\n", totalTime);
+    printf("Throughput is %0.3lf GBps.\n", (3 * nx * ny * nz * sizeof(float) * numiter) / (1000000000.0 * totalTime / 1000.0));
+    if (power != -1) // -1 --> failed to read energy values
+    {
+        printf("Total energy used is %0.3lf jouls.\n", energy);
+        printf("Average power consumption is %0.3lf watts.\n", power);
+    }
+
     return;
 }
 

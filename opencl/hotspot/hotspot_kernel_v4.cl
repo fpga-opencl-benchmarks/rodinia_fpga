@@ -1,125 +1,119 @@
 #include "hotspot_common.h"
-#include "../common/opencl_kernel_common.h"
+
+#ifndef UNROLL
+	#define UNROLL 1
+#endif
 
 #define IN_RANGE(x, min, max)   ((x)>=(min) && (x)<=(max))
 
-#ifndef BSIZE
-	#if defined(AOCL_BOARD_de5net_a7)
-		#define BSIZE 256
-	#endif
-#endif
+__attribute__((reqd_work_group_size(BLOCK_X, BLOCK_Y, 1)))
+__attribute__((num_simd_work_items(SSIZE)))
+__kernel void hotspot(int             comb_iter,		// either equal to pyramid_height or the remaining number of iterations
+             __global float* restrict power,			// power input
+             __global float* restrict temp_src,		// temperature input/output
+             __global float* restrict temp_dst,		// temperature input/output
+                      int             grid_cols,		// Col of grid
+                      int             grid_rows,		// Row of grid
+                      int             pyramid_height,	// number of combined iterations or degree of temporal parallelism
+                      float           step_div_Cap,	// number of steps divided by capacitance
+                      float           Rx_1, 
+                      float           Ry_1, 
+                      float           Rz_1,
+                      int             small_block_rows,
+                      int             small_block_cols)
+{	
+	__local float __attribute__((memory, numbanks(1), bankwidth(4 * SSIZE), doublepump)) temp_local[BLOCK_Y][BLOCK_X];
+	float power_local, temp_in, temp_out;
 
-#ifndef SIMD
-	#if defined(AOCL_BOARD_de5net_a7)
-		#define SIMD 16
-	#endif
-#endif
-
-#ifndef CU
-	#if defined(AOCL_BOARD_de5net_a7)
-		#define CU 1
-	#endif
-#endif
-
-__attribute__((reqd_work_group_size(BSIZE, BSIZE, 1)))
-__attribute__((num_simd_work_items(SIMD)))
-__attribute__((num_compute_units(CU)))
-__kernel void hotspot(__global float* restrict power,		// power input
-                      __global float* restrict temp_src,	// temperature input/output
-                      __global float* restrict temp_dst,	// temperature input/output
-                               int             grid_cols,	// number of columns
-                               int             grid_rows,	// number of rows
-                               float           step_div_Cap,	// step/Cap
-                               float           Rx_1, 
-                               float           Ry_1, 
-                               float           Rz_1)
-{
-	__local float cache[BSIZE][BSIZE];
-	float current, right, right_1, right_2, left, left_1, left_2; // these extra registers are used to help the compiler properly understand and coalesce memory accesses to Block RAMs
-
-	// group id
+	// group number in each dimension
 	int bx = get_group_id(0);
 	int by = get_group_id(1);
 
-	// thread id
+	// thread number in each dimension
 	int tx = get_local_id(0);
 	int ty = get_local_id(1);
-
-	// total number of groups in each dimension
-	int gx = get_num_groups(0);
-	int gy = get_num_groups(1);
 	
+	// calculate the boundary for the block according to 
+	// the boundary of its small block
+	int blkXmin = small_block_cols * bx - pyramid_height;
+	int blkXmax = blkXmin + BLOCK_X - 1;
+	int blkYmin = small_block_rows * by - pyramid_height;
+	int blkYmax = blkYmin + BLOCK_Y - 1;
 
-	// each block finally computes result for a small block
-	// after N iterations. 
-	// it is the non-overlapping small blocks that cover 
-	// all the input data
-
-	// calculate the small block size
-	int small_block_rows = BSIZE - 2;
-	int small_block_cols = BSIZE - 2;
-
-	// calculate the boundary for the big block 
-	// based on the boundary of its small block
-	int blkYstart = small_block_rows * by - 1; // boundary of small block -1
-	int blkXstart = small_block_cols * bx - 1; // boundary of small block -1
-	int blkYend   = blkYstart + BSIZE - 1;
-	int blkXend   = blkXstart + BSIZE - 1;
-
-	// calculate the global thread coordination, not equal to global thread id
-	int xidx = blkXstart + tx;
-	int yidx = blkYstart + ty;
-
-	int index = grid_cols * yidx + xidx;
+	// calculate the global thread coordination
+	int loadXidx = blkXmin + tx;
+	int loadYidx = blkYmin + ty;
 
 	// load data if it is within the valid input range
-	if(IN_RANGE(yidx, 0, grid_rows-1) && IN_RANGE(xidx, 0, grid_cols-1))
+	int index = grid_cols * loadYidx + loadXidx;
+
+	if(IN_RANGE(loadYidx, 0, grid_rows - 1) && IN_RANGE(loadXidx, 0, grid_cols - 1))
 	{
-		cache[ty][tx] = temp_src[index];  // load the temperature data from global memory to shared memory, row-wise load
+		temp_in = temp_src[index];		// Load the temperature data from global memory to private memory
+		power_local = power[index];		// Load the power data from global memory to private memory
 	}
+	// this barrier is unnecessary; however, removing it decreases the number of simultaneous work-groups the compiler
+	// allows, which results in noticeable performance reduction...
 	barrier(CLK_LOCAL_MEM_FENCE);
 
 	// effective range within this block that falls within 
 	// the valid range of the input data
 	// used to rule out computation outside the boundary.
+	int validXmin = (blkXmin <       0      ) ? pyramid_height : 0;
+	int validXmax = (blkXmax > grid_cols - 1) ? BLOCK_X - 1 - (blkXmax - grid_cols + 1) : BLOCK_X - 1;
+	int validYmin = (blkYmin <       0      ) ? pyramid_height : 0;
+	int validYmax = (blkYmax > grid_rows - 1) ? BLOCK_Y - 1 - (blkYmax - grid_rows + 1) : BLOCK_Y - 1;
 
-	/*int validYmin = (by == 0) ? 1 : 0;						// first row of blocks
-	int validYmax = (by == gy - 1) ? grid_rows%small_block_rows : BSIZE - 1;	// last row of blocks
-	int validXmin = (bx == 0) ? 1 : 0;						// first column of blocks
-	int validXmax = (bx == gx - 1) ? grid_cols%small_block_cols : BSIZE - 1;	// last column of blocks*/
-	
-	int last_block_rows = grid_rows%small_block_rows;				// number of valid rows in the bottommost blocks
-	int last_block_cols = grid_cols%small_block_cols;				// number of valid columns in the rightmost blocks
-
-	int N = ty - 1;
-	int S = ty + 1;
-	int W = tx - 1;
-	int E = tx + 1;
-
-	N = (N == 0 && by == 0) ? 1 : N;						// might go out of bounds only on topmost row of blocks
-	//W = (W == 0 && bx == 0) ? 1 : W;						// might go out of bounds only on leftmost row of blocks
-	S = (S > last_block_rows && by == gy - 1) ? last_block_rows : S;		// might go out of bounds only on bottommost row of blocks
-	//E = (E > last_block_cols && bx == gx - 1) ? last_block_cols : E;		// might go out of bounds only on rightmost row of blocks
-
-	// in the following assignments, we try to load both possible values for left and right neighbors
-	// and choose the correct one at the end; this allows accesses to be coalesced when SIMD is used
-	// the original implementation chooses the correct address instead of the value and hence
-	// the compiler cannot coalesce accesses due to variable address (dynamic indexing)
-	right_1 = cache[ty][tx + 1];							// assuming that we are not on rightmost column of the matrix
-	left_1  = cache[ty][tx - 1];							// assuming that we are not on the leftmost column of the matrix
-	right_2 = left_2 = current = cache[ty][tx];					// assuming that we are on the leftmost or rightmost column of the matrix
-	right   = (E > last_block_cols && bx == gx - 1) ? right_2 : right_1;		// choose correct value for right neighbor
-	left    = (W == 0 && bx == 0)                   ? left_2  : left_1;		// choose correct value for left neighbor
-
-	if(tx != 0 && tx != BSIZE - 1 &&						// tx equal to 0 or BSIZE - 1 are always out of bounds for computation and are only used for memory load
-           ty != 0 && ty != BSIZE - 1 &&						// ty equal to 0 or BSIZE - 1 are always out of bounds for computation and are only used for memory load
-	   !(ty > last_block_rows && by == gy - 1) &&					// prevent out of bound computation in the bottommost blocks
-	   !(tx > last_block_cols && bx == gx - 1))					// prevent out of bound computation in the rightmost blocks
+	bool computed;
+	#pragma unroll UNROLL
+	for (int i = 0; i < comb_iter; i++)
 	{
-		temp_dst[index] = current + step_div_Cap *
-		                  (power[index] +
-		                  (cache[S][tx] + cache[N][tx] - 2.0f * current) * Ry_1 +
-		                  (right + left - 2.0f * current) * Rx_1 +
-		                  (AMB_TEMP - current) * Rz_1);
+		// avoid putting temp_local in the following condition block for correct
+		// access coalescing and minimum number of ports to the local buffer
+		float temp;
+		if (i == 0)           // first iteration
+		{
+			temp = temp_in;  // read the data read from global memory and saved on-chip
+		}
+		else if (computed)    // valid computation
+		{
+			temp = temp_out; // read output from previous iteration
+		}
+		temp_local[ty][tx] = temp;
+		barrier(CLK_LOCAL_MEM_FENCE);
+
+		computed = false;
+		float center     = temp_local[ty][tx];
+		float east_temp  = temp_local[ty][tx + 1];
+		float west_temp  = temp_local[ty][tx - 1];
+		float north_temp = temp_local[ty - 1][tx];
+		float south_temp = temp_local[ty + 1][tx];
+		barrier(CLK_LOCAL_MEM_FENCE);
+
+		// fall on boundary in neighbor is out of bounds
+		float east  = (tx + 1 > validXmax) ? center : east_temp;
+		float west  = (tx - 1 < validXmin) ? center : west_temp;
+		float north = (ty - 1 < validYmin) ? center : north_temp;
+		float south = (ty + 1 > validYmax) ? center : south_temp;
+		
+		if(IN_RANGE(tx, i + 1, BLOCK_X - i - 2) && IN_RANGE(ty, i + 1, BLOCK_Y - i - 2) && IN_RANGE(tx, validXmin, validXmax) && IN_RANGE(ty, validYmin, validYmax))
+		{
+			computed = true;
+			temp_out = center + step_div_Cap * (power_local   + 
+					 (south + north - 2.0f * center) * Ry_1 + 
+					 (east  + west  - 2.0f * center) * Rx_1 + 
+					 (AMB_TEMP - center) * Rz_1);
+		}
+		
+		if(i == comb_iter - 1) // last combined iteration
+			break;
+	}
+
+	// update the global memory
+	// after the last comb_iter, only threads coordinated within the 
+	// small block perform the calculation and switch on "computed"
+	if (computed)
+	{
+		temp_dst[index]= temp_out;		
 	}
 }

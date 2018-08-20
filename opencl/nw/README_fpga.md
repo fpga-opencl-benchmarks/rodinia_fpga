@@ -1,45 +1,51 @@
 # Compilation
 
-The simplest way to build kernels is to use build.sh as:
+Default:
 
 ```
-./build.sh
+make Altera=1 BOARD=[board_name]
 ```
 
-This will build the default set of kernels. 
-
-Each kernel has some performance-sensitive parameters, which are
-described below. To compile those kernels with its parameter
-configuration, pass optional argument to the make command. For
-example, build the kernel of version 9 with BSIZE set to 128:
-
+Host only:
 ```
-make ALTERA=1 board=de5net_a7 v=9 BSIZE=128 kernel
+make ALTERA=1 HOST_ONLY=1
 ```
 
-This will build a binary named nw_kernel_v9_BSIZE128.aocx from
-nw_kernel_v9.cl with BSIZE set to 128.
+Custom kernel:
 
-The build.sh script also allows to set those parameters and
-additionally it can be instructed to send email after compilation. 
+```
+aoc [kernel_name] -g -v --report --board [board_name] -I../../ -D[parameter_name]=[parameter_value]
+```
 
 # Execution
 
-To run the benchmark with problem size of 1024^2:
+Default run:
 
 ```
-./nw 1024 10 [version]
+./run v[version_number]
 ```
 
-For example, to run the v9 kernel:
+Custom run:
 
 ```
-./nw 1024 10 128 nw_kernel_v9_BSIZE128.aocx
+./nw [input_size] [penalty] v[version_number]
 ```
 
 # Kernel variations
 
-See the github Wiki page for more general information. 
+See the github Wiki page for more general information.
+
+## v0
+
+Same as original Rodinia kernel with restrict and removal of unused
+kernel arguments. Local buffers definition is also moved from kernel
+argument space to inside of the kernel. The former case, apart from being
+a very bad design practice, also breaks area estimation in earlier versions
+of Intel's OpenCL Compiler since the area usage by these buffers is not
+taken into account. Finally, when such buffers are defined as a kernel
+argument, their size must be a power of two or else compilation will fail,
+while such limitation does not exist for local buffers defined inside of
+the kernel.
 
 ## v1
 
@@ -48,6 +54,13 @@ Iterates through the 2-dimensional space from top left to bottom right.
 Due to load/store dependency on the input_itemsets variable, the outer
 loop is run sequentially and the inner loop is run with an II of 328
 (latency of two memory accesses).
+
+## v2
+
+Extends v0 with reqd_work_group_size, SIMD and unrolling. Due to naive kernel
+design and huge number of accesses to the local buffers, it is impossible to go
+beyond a BSIZE of 64 or SIMD size of 2 with this kernel. Unrolling is completely
+out of the question since it blows the Block RAM usage through the roof.
 
 ## v3
 
@@ -59,134 +72,42 @@ dependency on the same variable which is unavoidable in this implementation.
 Unrolling the inner loop results in new load/store dependencies and hence,
 was avoided.
 
-## nw_kernel_single_work_item_volatile.cl (formerly v5)
+## v5 (BEST)
 
-Similer to the method presented in [Settle, HPEC'13]
-(http://hgpu.org/?p=10816), it uses a local fixed-sized array to
-propagate the computed values down to the vertical iterations. The
-array should work as a shift register.
+Parameters: BSIZE, PAR
 
-Since the shift register size is limited, this version uses 1-D
-blocking, where each kernel invocation only computes a sub block of
-max_rows*BLOCK_SIZE. The block size can be changed as follows:
-
-```
-make KERNEL_DIM="-BLOCK_SIZE=64"
-```
-
-The size of the block affects the performance and the compilation time
-considerably. A smaller size results in less usage of FPGA resources
-and a faster clock speed, but requires a larger number of kernel
-invocations. Block size of 64, which is the default for de5net_a7,
-seems to works best with Stratix 5 for a 2D matrix of 2048^2. Block
-size of 128 or larger resulted in fitting errors.
-
-Note that since the kernel uses the single array as input and output,
-the compiler was originally unable to pipeline the loop. The
-workaround used in this version is to mimic the compiler by passing
-the array as two separate (restricted) pointer parameters for input
-and output. This way, the compiler can reason that the loop does not
-have data dependency and it seems to pipeline the loop. However,
-likely due to this technically incorrect usage of restrict parameters,
-the kernel invoked second or thereafter seems to have incorrect
-caching behavior. Specifying "volatile" to input_itemsets removes the
-problem.
-
-## v7
-
-Parameters: BSIZE
-
-This version basically uses the same pipelining scheme as v5, but does
-not use the trick to hide the data dependency. It correctly uses
-restrict and volatile is not necessary here. To do so, it uses two 1-D
-arrays that correspond to vertical columns at the two ends of the sub
-region. It also uses a 1-D array that corresponds to the top-most
-horizontal row. This way, there is no read to the final output matrix,
-so the compiler can safely pipeline the loop.
-
-It also uses const for constant arrays, which seems to result in a
-little faster performance.
-
-Unlike v5, de5net_a7 can fit the block size of 128. Performance does
-not differ much for 2048^2, but about 10% faster for 4096 (16 ms
-vs. 18 ms). It can't fit the block size of 256.
-
-## single_work_item_2d_blocking
-
-This used to be v7 at commit
-f4dea53a210b606eb589932adb03ae42e8eeae12. It was the first attempt to
-apply shift registers, and used 2-D blocking, while the current
-version uses 1-D blocking. It seems just 1-D blocking is better than
-2-D. 
-
-## v9 (BEST)
-
-Based on v7.
-
-Parameters: BSIZE
-
-Mostly the same as v7, but the dimensions of the output_itemsets array
-and others are smaller by one, which is slightly more efficient than
-v7 because of better memory alignment. The original kernel has one
-extra row and column, but since we are using saparate 1D arrays for
-them, those extra areas are not necessary.
-
-## v11
-
-Based on v7.
-
-This version uses channels to directly transfer the boundary data from
-one kernel to the next kernel. Less efficient than v7.
-
-## v13
-
-Based on v11.
-
-Similar to v11, but uses 3 channels to create 4 pipelines directly
-connected with channels. Slower than v7.
-
-Note that nw.c does not seem to have code to correctly use this
-version of the kernel.
-
-## v15
-
-Based on v7.
-
-It creates 2 pipelines to exploit the pipeline parallelism
-across those 2 pipelines. The first pipeline computes the upper half
-of the matrix, and the other does the lower half. There is a
-dependency from the upper pipeline to the lower when computing the
-same band of columns, but there is no depency diagnorally. The two
-pipelines are invoked in a wavefront way as illustrated below:
-
-Time step 1:
-
-```
-[X] [ ]
-[ ] [ ]
-```
-
-The sub matrix with "X" is computed at time step 1.
-
-Time step 2:
-
-```
-[ ] [X]
-[X] [ ]
-```
-
-Next, both the upper-right and lower-left sub matrices can be computed
-in parallel.
-
-Time step 3:
-
-```
-[ ] [ ]
-[ ] [X]
-```
-
-Finally, the remaining lower-right sub matrix is comuputed by the
-second pipeline.
-
-Turned out that this is not effective. Still v9 is faster on Stratix V.
-
+This version uses blocking and diagonal parallelism with a block height of
+BSIZE and a parallelism degree of PAR. Computation starts from top-left and
+moves downwards, computing one chunk of columns at a time with a chunk width
+of PAR. The chunk of columns is calculated in a diagonal fashion, with the first
+diagonal starting from an out-of-bound point and ending on the top-left cell in
+the grid. Then computation moves downwards, calculating one diagonal with PAR
+cells at a time until the bottom-cell in the diagonal falls on the bottom-left
+cell in the block. For the next diagonal, the cells that would fall inside the
+next block instead wrap around the block and start computing cells from the next
+chunk of columns in the current block. When the first cell in the diagonal falls
+on the block boundary, the computation of the first chunk of columns is finished
+and every cell computed after that will be from the second chunk of columns. When
+all the columns in a block are computed, computation moves to the next block and
+computation repeats in the same fashion. To correctly handle the dependencies,
+each newly-computed cell is buffered on-chip using shift registers for two iterations
+to resolve the dependency on the top cell in the next iteration (diagonal) and
+top-left in the iteration after that. Furthermore, the cells on the right-most column
+in the current chunk of columns are also buffered in a large shift register with the
+size of BSIZE so that they can be reused in the next chunk of columns. Finally, the
+blocks are also overlapped by one row to provide the possibility to re-read the
+cells on the boundary computed in the previous block and handle the dependencies for
+the first new row in the new block.
+Since diagonal computation prevents memory access coalescing, we manually insert a
+set of shift registers between the memory accesses (both read and write) and
+computation to delay memory accesses and convert diagonal accesses to consecutive
+coalesceable ones. For reading, the shift register for the first column in the chunk
+has a size of par and as we move towards the last column in the chunk, the shift
+registers get smaller by one cell until the last column where the shift register
+will turn into a single register. For writes, the set of shift registers instead
+starts from a single register and ends with a shift register of size par. Furthermore,
+writes start PAR iterations after reads and hence, the input width is padded by PAR
+cells to allow the cells in the rightmost chunk of columns to be written back to
+external memory correctly. Finally, to improve alignment of external memory accesses,
+we pass the first column of the input that is read-only using a separate buffer so
+that reads from and writes to the main buffer start from the address 0 instead of 1.

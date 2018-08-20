@@ -1,9 +1,7 @@
 #include <stdio.h>
-#include <time.h>
 #include <assert.h>
 #include <stdlib.h> 
 #include <math.h> 
-#include <sys/time.h>
 
 #define BLOCK_SIZE 16
 #define STR_SIZE 256
@@ -38,20 +36,22 @@ void readinput(float *vect, int grid_rows, int grid_cols, int layers, char *file
     float val;
 
     if( (fp  = fopen(file, "r" )) ==0 )
-      fatal( "The file was not opened" );
+    {
+      fatal( "The input file could not be opened!" );
+      exit(-1);
+    }
 
-
-    for (i=0; i <= grid_rows-1; i++) 
-      for (j=0; j <= grid_cols-1; j++)
-        for (k=0; k <= layers-1; k++)
-          {
-            if (fgets(str, STR_SIZE, fp) == NULL) fatal("Error reading file\n");
-            if (feof(fp))
-              fatal("not enough lines in file");
-            if ((sscanf(str, "%f", &val) != 1))
-              fatal("invalid file format");
-            vect[i*grid_cols+j+k*grid_rows*grid_cols] = val;
-          }
+    for (k=0; k < layers; k++)
+      for (i=0; i < grid_rows; i++) 
+        for (j=0; j < grid_cols; j++)
+        {
+          if (fgets(str, STR_SIZE, fp) == NULL) fatal("Error reading file\n");
+          if (feof(fp))
+            fatal("not enough lines in file");
+          if ((sscanf(str, "%f", &val) != 1))
+            fatal("invalid file format");
+          vect[i*grid_cols+j+k*grid_rows*grid_cols] = val;
+        }
 
     fclose(fp);	
 
@@ -65,16 +65,19 @@ void writeoutput(float *vect, int grid_rows, int grid_cols, int layers, char *fi
     char str[STR_SIZE];
 
     if( (fp = fopen(file, "w" )) == 0 )
-      printf( "The file was not opened\n" );
+    {
+      fatal( "The output file could not be opened!" );
+      exit(-1);
+    }
 
-    for (i=0; i < grid_rows; i++) 
-      for (j=0; j < grid_cols; j++)
-        for (k=0; k < layers; k++)
-          {
-            sprintf(str, "%d\t%g\n", index, vect[i*grid_cols+j+k*grid_rows*grid_cols]);
-            fputs(str,fp);
-            index++;
-          }
+    for (k=0; k < layers; k++)
+      for (i=0; i < grid_rows; i++) 
+        for (j=0; j < grid_cols; j++)
+        {
+          sprintf(str, "%d\t%g\n", index, vect[i*grid_cols+j+k*grid_rows*grid_cols]);
+          fputs(str,fp);
+          index++;
+        }
 
     fclose(fp);	
 }
@@ -134,33 +137,53 @@ float accuracy(float *arr1, float *arr2, int len)
 
 void usage(int argc, char **argv)
 {
-    fprintf(stderr, "Usage: %s <rows/cols> <layers> <iterations> <powerFile> <tempFile> <outputFile>\n", argv[0]);
-    fprintf(stderr, "\t<rows/cols>  - number of rows/cols in the grid (positive integer)\n");
-    fprintf(stderr, "\t<layers>  - number of layers in the grid (positive integer)\n");
-
-    fprintf(stderr, "\t<iteration> - number of iterations\n");
+    fprintf(stderr, "Usage: %s <rows> <cols> <layers> <iterations> <powerFile> <tempFile> <outputFile>\n", argv[0]);
+    fprintf(stderr, "\t<rows>  - number of rows/cols in the grid (positive integer)\n");
+    fprintf(stderr, "\t<cols>  - number of rows/cols in the grid (positive integer)\n");
+    fprintf(stderr, "\t<layers>     - number of layers in the grid (positive integer)\n");
+    fprintf(stderr, "\t<iteration>  - number of iterations\n");
     fprintf(stderr, "\t<powerFile>  - name of the file containing the initial power values of each cell\n");
-    fprintf(stderr, "\t<tempFile>  - name of the file containing the initial temperature values of each cell\n");
-    fprintf(stderr, "\t<outputFile - output file\n");
+    fprintf(stderr, "\t<tempFile>   - name of the file containing the initial temperature values of each cell\n");
+    fprintf(stderr, "\t<outputFile> - output file\n\n");
+  
+    fprintf(stderr, "\tNote: If input file names are not supplied, input is generated randomly.\n");
+    fprintf(stderr, "\tNote: If output file name is not supplied, output will not be written to disk.\n");
     exit(1);
 }
 
 int main(int argc, char** argv)
 {
-    if (argc != 7)
+    int write_out = 0;
+
+    if (argc < 5 || argc > 8)
     {
         usage(argc,argv);
     }
 
-    char *pfile, *tfile, *ofile;
-    int iterations = atoi(argv[3]);
+    char *pfile = NULL, *tfile = NULL, *ofile = NULL;
+    int iterations = atoi(argv[4]);
 
-    pfile = argv[4];
-    tfile = argv[5];
-    ofile = argv[6];
-    int numCols = atoi(argv[1]);
-    int numRows = atoi(argv[1]);
-    int layers = atoi(argv[2]);
+    if (argc == 8)
+    {
+      write_out      = 1;
+      pfile          = argv[5];
+      tfile          = argv[6];
+      ofile          = argv[7];
+    }
+    else if (argc == 7)
+    {
+      pfile          = argv[5];
+      tfile          = argv[6];
+    }
+    else if (argc == 6)
+    {
+      write_out      = 1;
+      ofile          = argv[5];
+    }
+
+    int numCols      = atoi(argv[1]);
+    int numRows      = atoi(argv[2]);
+    int layers       = atoi(argv[3]);
 
     /* calculating parameters*/
 
@@ -177,27 +200,51 @@ int main(int argc, char** argv)
     float dt = PRECISION / max_slope;
 
 
-    float *powerIn, *tempOut, *tempIn, *tempCopy;
+    float *powerIn, *tempOut, *tempIn;
     int size = numCols * numRows * layers;
 
     powerIn = (float*)calloc(size, sizeof(float));
-    tempCopy = (float*)malloc(size * sizeof(float));
+#ifdef VERIFY
+    float* tempCopy = (float*)malloc(size * sizeof(float));
+    float* answer = (float*)calloc(size, sizeof(float));
+#endif
     tempIn = (float*)calloc(size,sizeof(float));
     tempOut = (float*)calloc(size, sizeof(float));
-    float* answer = (float*)calloc(size, sizeof(float));
 
-    readinput(powerIn,numRows, numCols, layers,pfile);
-    readinput(tempIn, numRows, numCols, layers, tfile);
+    if (argc == 7)
+    {
+        readinput(powerIn, numRows, numCols, layers,pfile);
+        readinput(tempIn,  numRows, numCols, layers, tfile);
+    }
+    else
+    {
+        srand(10);
+        int i;
+        for (i = 0; i < size; i++)
+        {
+            powerIn[i] = (float)rand() / (float)(RAND_MAX); // random number between 0 and 1
+            tempIn[i] = 300 + (float)rand() / (float)(RAND_MAX/100); // random number between 300 and 400
+        }
+    }
 
-    memcpy(tempCopy,tempIn, size * sizeof(float));
+#ifdef VERIFY
+    memcpy(tempCopy,tempIn, size * sizeof(float)); // back up original buffer for verification
+#endif
 
     hotspot_opt1(powerIn, tempIn, tempOut, numCols, numRows, layers, Cap, Rx, Ry, Rz, dt,iterations);
 
+#ifdef VERIFY
     computeTempCPU(powerIn, tempCopy, answer, numCols, numRows, layers, Cap, Rx, Ry, Rz, dt,iterations);
-
-    float acc = accuracy(tempOut,answer,numRows*numCols*layers);
+    float* CPUOut = (iterations % 2 == 1) ? answer  : tempCopy;
+    float acc = accuracy(tempOut,CPUOut,numRows*numCols*layers);
     printf("Accuracy: %e\n",acc);
-    writeoutput(tempOut,numRows, numCols, layers, ofile);
+#endif
+
+    if (write_out)
+    {
+        writeoutput(tempOut,numRows, numCols, layers, ofile);
+    }
+
     free(tempIn);
     free(tempOut); free(powerIn);
     return 0;

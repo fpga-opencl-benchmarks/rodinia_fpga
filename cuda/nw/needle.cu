@@ -15,7 +15,7 @@
 // includes, kernels
 #include "needle_kernel.cu"
 
-TimeStamp start[2], end[2];
+TimeStamp start, end;
 double totalTime;
 int flag = 0;
 double power = 0;
@@ -72,11 +72,11 @@ int
 main( int argc, char** argv) 
 {
 
-  printf("WG size of kernel = %d \n", BLOCK_SIZE);
+	printf("WG size of kernel = %d \n", BLOCK_SIZE);
 
-    runTest( argc, argv);
+	runTest( argc, argv);
 
-    return EXIT_SUCCESS;
+	return EXIT_SUCCESS;
 }
 
 void usage(int argc, char **argv)
@@ -89,13 +89,13 @@ void usage(int argc, char **argv)
 
 void runTest( int argc, char** argv) 
 {
-    int max_rows, max_cols, penalty;
-    int *input_itemsets, *output_itemsets, *referrence;
+	int max_rows, max_cols, penalty;
+	int *input_itemsets, *output_itemsets, *referrence;
 	int *matrix_cuda,  *referrence_cuda;
 	int size;
 	
-    
-    // the lengths of the two sequences should be able to divided by 16.
+
+	// the lengths of the two sequences should be able to divided by 16.
 	// And at current stage  max_rows needs to equal max_cols
 	if (argc == 3)
 	{
@@ -103,20 +103,20 @@ void runTest( int argc, char** argv)
 		max_cols = atoi(argv[1]);
 		penalty = atoi(argv[2]);
 	}
-    else{
-	usage(argc, argv);
-    }
+	else{
+		usage(argc, argv);
+	}
 	
 	if(atoi(argv[1])%16!=0){
-	fprintf(stderr,"The dimension values must be a multiple of 16\n");
-	exit(1);
+		fprintf(stderr,"The dimension values must be a multiple of 16\n");
+		exit(1);
 	}
 	
 
 	max_rows = max_rows + 1;
 	max_cols = max_cols + 1;
 	referrence = (int *)malloc( max_rows * max_cols * sizeof(int) );
-    input_itemsets = (int *)malloc( max_rows * max_cols * sizeof(int) );
+	input_itemsets = (int *)malloc( max_rows * max_cols * sizeof(int) );
 	output_itemsets = (int *)malloc( max_rows * max_cols * sizeof(int) );
 	
 
@@ -164,22 +164,32 @@ long long time6;
 time0 = get_time();
 time1 = get_time();
 
-    size = max_cols * max_rows;
-	cudaMalloc((void**)& referrence_cuda, sizeof(int)*size);
-	cudaMalloc((void**)& matrix_cuda, sizeof(int)*size);
+	size = max_cols * max_rows;
+	cudaError_t err;
+	err = cudaMalloc((void**)& referrence_cuda, sizeof(int)*size);
+	if (err != cudaSuccess)
+	{
+		printf("Failed to allocate CUDA device buffer!\n");
+		exit(-1);
+	}
+	err = cudaMalloc((void**)& matrix_cuda, sizeof(int)*size);
+	if (err != cudaSuccess)
+	{
+		printf("Failed to allocate CUDA device buffer!\n");
+		exit(-1);
+	}
 	
 time2 = get_time();
 
 	cudaMemcpy(referrence_cuda, referrence, sizeof(int) * size, cudaMemcpyHostToDevice);
 	cudaMemcpy(matrix_cuda, input_itemsets, sizeof(int) * size, cudaMemcpyHostToDevice);
 
-    dim3 dimGrid;
+	dim3 dimGrid;
 	dim3 dimBlock(BLOCK_SIZE, 1);
 	int block_width = ( max_cols - 1 )/BLOCK_SIZE;
 
 time3 = get_time();
 
-	printf("Processing top-left matrix\n");
 	#pragma omp parallel num_threads(2) shared(flag)
 	{
 		if (omp_get_thread_num() == 0)
@@ -190,12 +200,12 @@ time3 = get_time();
 		{
 			#pragma omp barrier
 #ifdef FOR
-			for(int k = 0; k < 200; k++)
+			for(int k = 0; k < 20; k++)
 			{
 				if (k == 0) // if for loop for power measurement is enabled, only first run is timed
 				{
 #endif
-					GetTime(start[0]);
+					GetTime(start);
 #ifdef FOR
 				}
 #endif
@@ -208,27 +218,8 @@ time3 = get_time();
 									,max_cols, penalty, i, block_width); 
 				}
 				cudaThreadSynchronize();
-#ifdef FOR
-				if (k == 0)
-				{
-#endif
-					GetTime(end[0]);
-#ifdef FOR
-				}
-			}
-#endif
-			printf("Processing bottom-right matrix\n");
-			//process bottom-right matrix
-#ifdef FOR
-			for(int k = 0; k < 200; k++)
-			{
-				if (k == 0)
-				{
-#endif
-					GetTime(start[1]);
-#ifdef FOR
-				}
-#endif
+
+				//process bottom-right matrix
 				for( int i = block_width - 1  ; i >= 1 ; i--)
 				{
 					dimGrid.x = i;
@@ -241,7 +232,7 @@ time3 = get_time();
 				if (k == 0)
 				{
 #endif
-					GetTime(end[1]);
+					GetTime(end);
 #ifdef FOR
 				}
 			}
@@ -249,7 +240,7 @@ time3 = get_time();
 			flag = 1;
 		}
 	}
-	totalTime = TimeDiff(start[0], end[0]) + TimeDiff(start[1], end[1]);
+	totalTime = TimeDiff(start, end);
 	energy = GetEnergyGPU(power, totalTime);
 
 time4 = get_time();

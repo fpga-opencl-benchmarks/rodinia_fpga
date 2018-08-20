@@ -1,27 +1,26 @@
-include ~/rodinia_3.0/common/make.config
+include ../../common/make.config
 
-CC := $(CUDA_DIR)/bin/nvcc
+SRC = hotspot3D.cu
 
-INCLUDE := $(CUDA_DIR)/include
+EXE = hotspot3D 
 
-SRC = 3D.cu
-
-EXE = 3D 
-
-OUTPUT = *.out
+OUTPUT = output.txt
 
 FLAGS = -g -G #-arch sm_20 --ptxas-options=-v
 release: $(SRC)
-	$(CC) $(KERNEL_DIM) $(FLAGS) $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) 
+	$(CUDA_CC) $(KERNEL_DIM) $(FLAGS) $(SRC) -o $(EXE) $(CUDA_FLAGS) $(NVML_INC) $(NVML_LIB)
+
+verify:
+	$(CUDA_CC) $(KERNEL_DIM) $(FLAGS) $(SRC) -o $(EXE) $(CUDA_FLAGS) $(NVML_INC) $(NVML_LIB) -DVERIFY
 
 enum: $(SRC)
-	$(CC) $(KERNEL_DIM) $(FLAGS) -deviceemu $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) 
+	$(CUDA_CC) $(KERNEL_DIM) $(FLAGS) -deviceemu $(SRC) -o $(EXE) $(CUDA_FLAGS) $(NVML_INC) $(NVML_LIB)
 
 debug: $(SRC)
-	$(CC) $(KERNEL_DIM) $(FLAGS) -g $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) 
+	$(CUDA_CC) $(KERNEL_DIM) $(FLAGS) -g $(SRC) -o $(EXE) $(CUDA_FLAGS) $(NVML_INC) $(NVML_LIB)
 
 debugenum: $(SRC)
-	$(CC) $(KERNEL_DIM) $(FLAGS) -g -deviceemu $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) 
+	$(CUDA_CC) $(KERNEL_DIM) $(FLAGS) -g -deviceemu $(SRC) -o $(EXE) $(CUDA_FLAGS) $(NVML_INC) $(NVML_LIB)
 
 clean: $(SRC)
 	rm -f $(EXE) $(EXE).linkinfo $(OUTPUT) 

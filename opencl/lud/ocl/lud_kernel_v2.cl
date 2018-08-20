@@ -1,20 +1,40 @@
-#ifndef BSIZE
-	#define BSIZE 16
+#include "../common/common.h"
+
+// diameter kernel settings
+#ifndef DIA_UNROLL
+	#define DIA_UNROLL	1 // nearly unusable since increases number of writes to local buffers to over 3, resulting in stallable accesses
+#endif
+#define DIA_SIMD		1 // unusable due to thread-id-dependent branching
+#define DIA_CU			1 // this kernel is only run by one work-group; hence, no point in compute unit replication
+
+// perimeter kernel settings
+#ifndef PERI_UNROLL
+	#define PERI_UNROLL	1 // nearly unusable since increases number of writes to local buffers to over 3, resulting in stallable accesses
+#endif
+#define PERI_SIMD		1 // unusable due to thread-id-dependent branching
+#ifndef PERI_CU
+	#define PERI_CU	4
 #endif
 
-#define LMEM_SIZE __attribute__((local_mem_size(BSIZE*BSIZE*4))) 
+// internal kernel settings
+#ifndef INT_SIMD
+	#define INT_SIMD	2
+#endif
+#ifndef INT_CU
+	#define INT_CU		1
+#endif
 
-#include "../common/opencl_kernel_common.h"
-
+__attribute__((num_simd_work_items(DIA_SIMD)))
+__attribute__((num_compute_units(DIA_CU)))
 __attribute__((reqd_work_group_size(BSIZE,1,1)))
-__kernel void 
-lud_diagonal(__global float* RESTRICT m, 
-LMEM_SIZE    __local  float* RESTRICT shadow,
-                      int             matrix_dim, 
-                      int             offset)
+__kernel void lud_diagonal(__global float* restrict m,
+                                    int             matrix_dim,
+                                    int             offset)
 { 
 	int i,j;
 	int tx = get_local_id(0);
+
+	__local float shadow[BSIZE * BSIZE];
 
 	int array_offset = offset*matrix_dim+offset;
 	for(i=0; i < BSIZE; i++)
@@ -29,6 +49,7 @@ LMEM_SIZE    __local  float* RESTRICT shadow,
 	{
 		if (tx>i)
 		{
+			#pragma unroll DIA_UNROLL
 			for(j=0; j < i; j++)
 			{
 				shadow[tx * BSIZE + i] -= shadow[tx * BSIZE + j] * shadow[j * BSIZE + i];
@@ -40,6 +61,7 @@ LMEM_SIZE    __local  float* RESTRICT shadow,
 
 		if (tx>i)
 		{
+			#pragma unroll DIA_UNROLL
 			for(j=0; j < i+1; j++)
 			{
 				shadow[(i+1) * BSIZE + tx] -= shadow[(i+1) * BSIZE + j]*shadow[j * BSIZE + tx];
@@ -57,14 +79,12 @@ LMEM_SIZE    __local  float* RESTRICT shadow,
 	}
 }
 
-__attribute__((reqd_work_group_size(BSIZE*2,1,1)))
-__kernel void
-lud_perimeter(__global float* RESTRICT m, 
-LMEM_SIZE     __local  float* RESTRICT dia,
-LMEM_SIZE     __local  float* RESTRICT peri_row,
-LMEM_SIZE     __local  float* RESTRICT peri_col,
-                       int             matrix_dim, 
-                       int             offset)
+__attribute__((num_compute_units(PERI_CU)))
+__attribute__((num_simd_work_items(PERI_SIMD)))
+__attribute__((reqd_work_group_size(2 * BSIZE,1,1)))
+__kernel void lud_perimeter(__global float* restrict m,
+                                     int             matrix_dim,
+                                     int             offset)
 {
 	int i,j, array_offset;
 	int idx;
@@ -72,9 +92,12 @@ LMEM_SIZE     __local  float* RESTRICT peri_col,
 	int  bx = get_group_id(0);	
 	int  tx = get_local_id(0);
 
+	__local float dia[BSIZE * BSIZE], peri_col[BSIZE * BSIZE], peri_row[BSIZE * BSIZE];
+
 	if (tx < BSIZE)
 	{
 		idx = tx;
+		#pragma unroll 1 //to disable auto unroll which results in explosion of ports to external memory
 		array_offset = offset*matrix_dim+offset;
 		for (i=0; i < BSIZE/2; i++)
 		{
@@ -93,6 +116,7 @@ LMEM_SIZE     __local  float* RESTRICT peri_col,
 	{
 		idx = tx-BSIZE;
 		array_offset = (offset+BSIZE/2)*matrix_dim+offset;
+		#pragma unroll 1 //to disable auto unroll which results in explosion of ports to external memory
 		for (i=BSIZE/2; i < BSIZE; i++)
 		{
 			dia[i * BSIZE + idx]=m[array_offset+idx];
@@ -113,6 +137,7 @@ LMEM_SIZE     __local  float* RESTRICT peri_col,
 		idx=tx;
 		for(i=1; i < BSIZE; i++)
 		{
+			#pragma unroll PERI_UNROLL
 			for (j=0; j < i; j++)
 			{
 				peri_row[i * BSIZE + idx]-=dia[i * BSIZE + j]*peri_row[j * BSIZE + idx];
@@ -124,6 +149,7 @@ LMEM_SIZE     __local  float* RESTRICT peri_col,
 		idx=tx - BSIZE;
 		for(i=0; i < BSIZE; i++)
 		{
+			#pragma unroll PERI_UNROLL
 			for(j=0; j < i; j++)
 			{
 				peri_col[idx * BSIZE + i]-=dia[j * BSIZE + i]*peri_col[idx * BSIZE + j];
@@ -149,25 +175,26 @@ LMEM_SIZE     __local  float* RESTRICT peri_col,
 		array_offset = (offset+(bx+1)*BSIZE)*matrix_dim+offset;
 		for(i=0; i < BSIZE; i++)
 		{
-			m[array_offset+idx] =  peri_col[i*BSIZE+idx];
+			m[array_offset+idx] = peri_col[i*BSIZE+idx];
 			array_offset += matrix_dim;
 		}
 	}
 }
 
+__attribute__((num_compute_units(INT_CU)))
+__attribute__((num_simd_work_items(INT_SIMD)))
 __attribute__((reqd_work_group_size(BSIZE,BSIZE,1)))
-__kernel void
-lud_internal(__global float* RESTRICT m, 
-LMEM_SIZE    __local  float* RESTRICT peri_row,
-LMEM_SIZE    __local  float* RESTRICT peri_col,
-                      int             matrix_dim, 
-                      int             offset)
+__kernel void lud_internal(__global float* restrict m,
+                                    int             matrix_dim,
+                                    int             offset)
 {
 	int  bx = get_group_id(0);
 	int  by = get_group_id(1);
   
 	int  tx = get_local_id(0);
 	int  ty = get_local_id(1);
+
+	__local float peri_col[BSIZE * BSIZE], peri_row[BSIZE * BSIZE];
 
 	int i;
 	float sum;

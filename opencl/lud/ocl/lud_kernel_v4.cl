@@ -1,110 +1,52 @@
-#ifndef BSIZE
-	#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-		#define BSIZE 128
+#include "../common/common.h"
+
+#ifndef DIA_UNROLL
+	#ifdef AOCL_BOARD_de5net_a7
+		#define DIA_UNROLL	4
 	#else
-		#define BSIZE 64
+		#define DIA_UNROLL	2
+	#endif
+#endif
+#ifndef PERI_UNROLL
+	#ifdef AOCL_BOARD_de5net_a7
+		#define PERI_UNROLL	8
+	#else
+		#define PERI_UNROLL	4		
+	#endif
+#endif
+#ifndef PERI_CU
+	#ifdef AOCL_BOARD_de5net_a7
+		#define PERI_CU	2
+	#else
+		#define PERI_CU	2
+	#endif
+#endif
+#ifndef INT_SIMD
+	#ifdef AOCL_BOARD_de5net_a7
+		#define INT_SIMD	2
+	#else
+		#define INT_SIMD	1
+	#endif
+#endif
+#ifndef INT_CU
+	#ifdef AOCL_BOARD_de5net_a7
+		#define INT_CU		1
+	#else
+		#define INT_CU		1
 	#endif
 #endif
 
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-	#define DIA_UNROLL    4
-	#define PERI_UNROLL   16
-	#define PERI_SIMD     1
-	#define PERI_COMPUTE  2
-	#define INTER_SIMD    4
-	#define INTER_COMPUTE 1
-#else
-	#define DIA_UNROLL    2
-	#define PERI_UNROLL   8
-	#define PERI_SIMD     1
-	#define PERI_COMPUTE  2
-	#define INTER_SIMD    1
-	#define INTER_COMPUTE 3
-#endif
-
-// Enable volatile for Arria 10 in the internal kernel
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
-	#define VOLATILE volatile
-#else
-	#define VOLATILE
-#endif
-
-#define LMEM_SIZE BSIZE*BSIZE
-#define DIA_LMEM_ATTRIB __attribute__((memory, numbanks(2), bankwidth(4*DIA_UNROLL), doublepump, numreadports(3), numwriteports(1)))
-
-#include "../common/opencl_kernel_common.h"
-
-// The Arria 10 version uses the old diameter implementation without splitting the shadow buffer since that optimization only reduces Block RAM usage
-// when there are enough Block RAMs to enable stall-free access. On Arria 10, there aren't enough Block RAMs either way, and accesses are stallable anyway,
-// using two buffers will actually increase memory usage in this case
-#ifdef AOCL_BOARD_a10pl4_dd4gb_gx115es3
 __attribute__((reqd_work_group_size(BSIZE,1,1)))
-__kernel void lud_diagonal(__global volatile float* RESTRICT m, 
-                                             int             matrix_dim,
-                                             int             offset)
+__kernel void lud_diagonal(__global float* restrict m, 
+                                    int             matrix_dim,
+                                    int             offset)
 { 
-	int i,j;
 	int tx = get_local_id(0);
-	__local float shadow[LMEM_SIZE];
+	__local float __attribute__((memory, numbanks(1), bankwidth(4*DIA_UNROLL), doublepump, numreadports(3), numwriteports(1))) shadow_row[BSIZE * BSIZE];
+	__local float __attribute__((memory, numbanks(1), bankwidth(4*DIA_UNROLL), doublepump, numreadports(3), numwriteports(1))) shadow_col[BSIZE * BSIZE];
 
-	int array_offset = offset * matrix_dim + offset;
-	for(i=0; i < BSIZE; i++)
-	{
-		shadow[i * BSIZE + tx] = m[array_offset + tx];
-		array_offset += matrix_dim;
-	}
-  
-	barrier(CLK_LOCAL_MEM_FENCE);
-	
-	for(i=0; i < BSIZE-1; i++)
-	{
-		if (tx>i)
-		{
-			float sum = 0.0f;
-			#pragma unroll DIA_UNROLL
-			for(j=0; j < i; j++)
-			{
-				sum += shadow[tx * BSIZE + j] * shadow[j * BSIZE + i];
-			}
-			shadow[tx * BSIZE + i] = (shadow[tx * BSIZE + i] - sum) / shadow[i * BSIZE + i];
-		}
-
-		barrier(CLK_LOCAL_MEM_FENCE);
-
-		if (tx>i)
-		{
-			float sum = 0.0f;
-			#pragma unroll DIA_UNROLL
-			for(j=0; j < i+1; j++)
-			{
-				sum += shadow[(i+1) * BSIZE + j] * shadow[j * BSIZE + tx];
-			}
-			shadow[(i+1) * BSIZE + tx] -= sum;
-		}
-
-		barrier(CLK_LOCAL_MEM_FENCE);
-	}
-
-	array_offset = (offset+1) * matrix_dim + offset;
-	for(i=1; i < BSIZE; i++)
-	{
-		m[array_offset + tx] = shadow[i * BSIZE + tx];
-		array_offset += matrix_dim;
-	}
-}
-
-#else
-__attribute__((reqd_work_group_size(BSIZE,1,1)))
-__kernel void lud_diagonal(__global volatile float* RESTRICT m, 
-                                             int             matrix_dim,
-                                             int             offset)
-{ 
-	int i,j;
-	int tx = get_local_id(0);
-	__local float DIA_LMEM_ATTRIB shadow_row[LMEM_SIZE], DIA_LMEM_ATTRIB shadow_col[LMEM_SIZE];
-
-	int array_offset = offset * matrix_dim + offset;
-	for(i=0; i < BSIZE; i++)
+	int array_offset = offset;
+	for(int i = 0; i < BSIZE; i++)
 	{
 		shadow_row[i * BSIZE + tx] = m[array_offset + tx];
 		shadow_col[tx * BSIZE + i] = m[array_offset + tx];
@@ -112,121 +54,106 @@ __kernel void lud_diagonal(__global volatile float* RESTRICT m,
 	}
   
 	barrier(CLK_LOCAL_MEM_FENCE);
-	
-	for(i=0; i < BSIZE-1; i++)
+
+	array_offset = offset + matrix_dim;
+	for(int i = 0; i < BSIZE - 1; i++)
 	{
-		if (tx>i)
+		if (tx > i)
 		{
 			float sum = 0.0f;
 			#pragma unroll DIA_UNROLL
-			for(j=0; j < i; j++)
+			for(int j = 0; j < i; j++)
 			{
 				sum += shadow_row[tx * BSIZE + j] * shadow_col[i * BSIZE + j];
 			}
 			shadow_row[tx * BSIZE + i] = (shadow_row[tx * BSIZE + i] - sum) / shadow_col[i * BSIZE + i];
-			shadow_col[i * BSIZE + tx] = shadow_row[tx * BSIZE + i];
+			//shadow_col[i * BSIZE + tx] = shadow_row[tx * BSIZE + i];		// commented out since it is not actually required and output is correct either way
 		}
 
 		barrier(CLK_LOCAL_MEM_FENCE);
 
-		if (tx>i)
+		if (tx > i)
 		{
 			float sum = 0.0f;
 			#pragma unroll DIA_UNROLL
-			for(j=0; j < i+1; j++)
+			for(int j = 0; j < i + 1; j++)
 			{
-				sum += shadow_row[(i+1) * BSIZE + j] * shadow_col[tx * BSIZE + j];
+				sum += shadow_row[(i + 1) * BSIZE + j] * shadow_col[tx * BSIZE + j];
 			}
-			shadow_row[(i+1) * BSIZE + tx] -= sum;
-			shadow_col[tx * BSIZE + (i+1)] = shadow_row[(i+1) * BSIZE + tx];
+			shadow_row[(i + 1) * BSIZE + tx] -= sum;
+			shadow_col[tx * BSIZE + (i + 1)] = shadow_row[(i + 1) * BSIZE + tx];
 		}
-
-		barrier(CLK_LOCAL_MEM_FENCE);
-	}
-
-	array_offset = (offset+1) * matrix_dim + offset;
-	for(i=1; i < BSIZE; i++)
-	{
-		m[array_offset + tx] = shadow_row[i * BSIZE + tx];
+		m[array_offset + tx] = shadow_row[(i + 1) * BSIZE + tx];
 		array_offset += matrix_dim;
 	}
 }
-#endif
 
-__attribute__((num_compute_units(PERI_COMPUTE)))
-__attribute__((num_simd_work_items(PERI_SIMD)))
-__attribute__((reqd_work_group_size(BSIZE*2,1,1)))
-__kernel void lud_perimeter(__global volatile float* RESTRICT m,
-                                              int             matrix_dim,
-                                              int             offset)
+__attribute__((num_compute_units(PERI_CU)))
+__attribute__((reqd_work_group_size(BSIZE * 2,1,1)))
+__kernel void lud_perimeter(__global float* restrict m,
+                                     int             matrix_dim,
+                                     int             offset)
 {
-	int i,j, array_offset;
-	int idx;
-	__local float dia_row[LMEM_SIZE], dia_col[LMEM_SIZE], peri_row[LMEM_SIZE], peri_col[LMEM_SIZE];
+	__local float dia_row[BSIZE * BSIZE], dia_col[BSIZE * BSIZE], peri_row[BSIZE * BSIZE];
+	__local float __attribute__((memory, numbanks(1), bankwidth(4*PERI_UNROLL), doublepump, numreadports(3), numwriteports(2))) peri_col[BSIZE * BSIZE];
 
-	int  bx = get_group_id(0);	
-	int  tx = get_local_id(0);
+	int bx = get_group_id(0);
+	int tx = get_local_id(0);
 
-	if (tx < BSIZE)
+	int idx = tx % BSIZE;
+	int txg = tx / BSIZE;
+
+	int constant_1 = txg * matrix_dim;
+	int constant_2 = (bx + 1) * BSIZE;
+	int constant_3 = (bx + 1) * BSIZE * matrix_dim;
+
+	int array_offset_1 = offset + constant_1;
+	int array_offset_2 = offset + constant_1 + constant_2;
+	int array_offset_3 = offset + constant_1 + constant_3;
+
+	// two block rows are read per iteration
+	for (int i = 0; i < BSIZE; i = i + 2)
 	{
-		idx = tx;
-		array_offset = offset * matrix_dim + offset;
-		for (i=0; i < BSIZE/2; i++)
-		{
-			dia_row[i * BSIZE + idx] = m[array_offset + idx];
-			dia_col[idx * BSIZE + i] = m[array_offset + idx];
-			array_offset += matrix_dim;
-		}
-    
-		array_offset = offset * matrix_dim + (bx+1) * BSIZE + offset;
-		for (i=0; i < BSIZE; i++)
-		{
-			peri_row[idx * BSIZE + i] = m[array_offset + idx];
-			array_offset += matrix_dim;
-		}
+		dia_row[(i + txg) * BSIZE + idx]  = m[array_offset_1 + idx];
+		dia_col[idx * BSIZE + (i + txg)]  = m[array_offset_1 + idx];
+		peri_row[idx * BSIZE + (i + txg)] = m[array_offset_2 + idx];
+		peri_col[(i + txg) * BSIZE + idx] = m[array_offset_3 + idx];
+
+		array_offset_1 += 2 * matrix_dim;
+		array_offset_2 += 2 * matrix_dim;
+		array_offset_3 += 2 * matrix_dim;
 	}
-	else
-	{
-		idx = tx - BSIZE;
-		array_offset = (offset + BSIZE/2) * matrix_dim + offset;
-		for (i=BSIZE/2; i < BSIZE; i++)
-		{
-			dia_row[i * BSIZE + idx] = m[array_offset + idx];
-			dia_col[idx * BSIZE + i] = m[array_offset + idx];
-			array_offset += matrix_dim;
-		}
-	
-		array_offset = (offset + (bx+1) * BSIZE) * matrix_dim + offset;
-		for (i=0; i < BSIZE; i++)
-		{
-			peri_col[i * BSIZE + idx] = m[array_offset + idx];
-			array_offset += matrix_dim;
-		}
-	}
+
 	barrier(CLK_LOCAL_MEM_FENCE);
 
 	if (tx < BSIZE)
 	{ //peri-row
-		idx = tx;
-		for(i=1; i < BSIZE; i++)
+		int idx = tx;
+		int peri_row_array_offset = offset + constant_2;
+		for(int i = 0; i < BSIZE; i++)
 		{
 			float sum = 0.0f;
 			#pragma unroll PERI_UNROLL
-			for (j=0; j < i; j++)
+			for (int j = 0; j < i; j++)
 			{
 				sum += dia_row[i * BSIZE + j] * peri_row[idx * BSIZE + j];
 			}
 			peri_row[idx * BSIZE + i] -= sum;
+
+			// write-back is done here since it removes one extra read from the peri_row buffer
+			// and accesses to external memory are consecutive based on work-group ID anyway
+			m[peri_row_array_offset + idx] = peri_row[idx * BSIZE + i];
+			peri_row_array_offset += matrix_dim;
 		}
 	}
 	else
 	{ //peri-col
-		idx = tx - BSIZE;
-		for(i=0; i < BSIZE; i++)
+		int idx = tx - BSIZE;
+		for(int i = 0; i < BSIZE; i++)
 		{
 			float sum = 0.0f;
 			#pragma unroll PERI_UNROLL
-			for(j=0; j < i; j++)
+			for(int j = 0; j < i; j++)
 			{
 				sum += dia_col[i * BSIZE + j] * peri_col[idx * BSIZE + j];
 			}
@@ -234,63 +161,48 @@ __kernel void lud_perimeter(__global volatile float* RESTRICT m,
 		}
 	}
 	barrier(CLK_LOCAL_MEM_FENCE);
-    
-	if (tx < BSIZE)
-	{ //peri-row
-		idx = tx;
-		array_offset = (offset+1) * matrix_dim + (bx+1) * BSIZE + offset;
-		for(i=1; i < BSIZE; i++)
-		{
-			m[array_offset + idx] = peri_row[idx * BSIZE + i];
-			array_offset += matrix_dim;
-		}
-	}
-	else
-	{ //peri-col
-		idx = tx - BSIZE;
-		array_offset = (offset + (bx+1) * BSIZE) * matrix_dim + offset;
-		for(i=0; i < BSIZE; i++)
-		{
-			m[array_offset + idx] =  peri_col[i * BSIZE + idx];
-			array_offset += matrix_dim;
-		}
+
+	int peri_col_array_offset = offset + constant_1 + constant_3;
+	// two block rows are written per iteration, disable compiler auto unrolling
+	#pragma unroll 1
+	for(int i = 0; i < BSIZE; i = i + 2)
+	{
+		// even though this could also be merged into the compute loop like the other write-back,
+		// it was avoided since it would have resulted in accesses that are not consecutive based
+		// on work-group ID and lowered performance
+		m[peri_col_array_offset + idx] = peri_col[(i + txg) * BSIZE + idx];
+		peri_col_array_offset += 2 * matrix_dim;
 	}
 }
 
-__attribute__((num_compute_units(INTER_COMPUTE)))
-__attribute__((num_simd_work_items(INTER_SIMD)))
+__attribute__((num_compute_units(INT_CU)))
+__attribute__((num_simd_work_items(INT_SIMD)))
 __attribute__((reqd_work_group_size(BSIZE,BSIZE,1)))
-// The Arria 10 version uses SIMD instead of multiple compute units for this kernel and the private cache seems to have a positive effect
-// only if multiple compute units are used. Because of this, for the Arria 10 version, volatile is used to disable the cache and save Block RAMs
-__kernel void lud_internal(__global VOLATILE float* RESTRICT m,
-                                             int             matrix_dim,
-                                             int             offset)
+__kernel void lud_internal(__global float* restrict m,
+                                    int             matrix_dim,
+                                    int             offset)
 {
-	int i;
-	float sum;
-	__local float peri_row[LMEM_SIZE], peri_col[LMEM_SIZE];
+	__local float peri_row[BSIZE * BSIZE], peri_col[BSIZE * BSIZE];
 
-	int  bx = get_group_id(0);
-	int  by = get_group_id(1);
+	int bx = get_group_id(0);
+	int by = get_group_id(1);
   
-	int  tx = get_local_id(0);
-	int  ty = get_local_id(1);
+	int tx = get_local_id(0);
+	int ty = get_local_id(1);
 
-	int global_row_id = offset + (by+1) * BSIZE;
-	int global_col_id = offset + (bx+1) * BSIZE;
+	int global_row_id = (by + 1) * BSIZE;
+	int global_col_id = (bx + 1) * BSIZE;
 
-	peri_row[ty * BSIZE + tx] = m[(offset + ty) * matrix_dim + global_col_id + tx];
-	peri_col[ty * BSIZE + tx] = m[(global_row_id + ty) * matrix_dim + offset + tx];
+	peri_row[ty * BSIZE + tx] = m[offset + (ty) * matrix_dim + global_col_id + tx];
+	peri_col[ty * BSIZE + tx] = m[offset + (global_row_id + ty) * matrix_dim + tx];
 
 	barrier(CLK_LOCAL_MEM_FENCE);
 
-// For peri_row, accesses should not normally be coalesceable since accesses to that buffer based on i
-// are not consecutive, but for some reason, probably due to full unrolling, this doesn't cause an issue.
-	sum = 0;
+	float sum = 0;
 	#pragma unroll
-	for (i=0; i < BSIZE; i++)
+	for (int i = 0; i < BSIZE; i++)
 	{
 		sum += peri_col[ty * BSIZE + i] * peri_row[i * BSIZE + tx];
 	}
-	m[(global_row_id + ty) * matrix_dim + global_col_id + tx] -= sum;
+	m[offset + (global_row_id + ty) * matrix_dim + global_col_id + tx] -= sum;
 }

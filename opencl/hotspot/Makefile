@@ -9,13 +9,35 @@ else
 	EXE = $(MAIN)
 endif
 
+ifdef TIME
+	CFLAGS += -DTIME=$(TIME)
+endif
+
+ifdef SSIZE
+	CFLAGS += -DSSIZE=$(SSIZE)
+endif
+
+ifdef BSIZE
+	CFLAGS += -DBSIZE=$(BSIZE)
+	CFLAGS += -DBLOCK_X=$(BSIZE)
+	CFLAGS += -DBLOCK_Y=$(BSIZE)
+endif
+
+ifdef BLOCK_X
+	CFLAGS += -DBLOCK_X=$(BLOCK_X)
+endif
+
+ifdef BLOCK_Y
+	CFLAGS += -DBLOCK_Y=$(BLOCK_Y)
+endif
+
 all: $(EXE)
 
 $(EXE): hotspot.c hotspot.h hotspot_common.h OpenCL_helper_library.c OpenCL_helper_library.h
 	$(CC) $(KERNEL_DIM) $(CFLAGS) -o $(EXE) $(OPENCL_INC) OpenCL_helper_library.c hotspot.c $(LDFLAGS) $(OPENCL_LIB)
 
 clean:
-	$(RM) $(EXE) *.aoco *.aocx $(KERNEL_NAMES)
+	$(RM) $(EXE) *.aoco $(KERNEL_NAMES)
 
 # Kernel offline compilations
 
@@ -27,7 +49,7 @@ kernel:
 
 ifdef ALTERA
 # default version
-v ?= 9
+v ?= 5
 # default block size
 BSIZE ?= 32
 # default points per stage

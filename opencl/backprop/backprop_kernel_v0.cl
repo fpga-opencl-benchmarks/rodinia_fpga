@@ -1,4 +1,3 @@
-#include "../common/opencl_kernel_common.h"
 
 #define THREADS 256
 #define WIDTH 16  
@@ -11,12 +10,12 @@
 #define WM(i, j)   weight_matrix[(j) + (i) * WIDTH]
 
 __kernel void 
-bpnn_layerforward_ocl(__global float* RESTRICT input_cuda,
-                      __global float* RESTRICT output_hidden_cuda,
-                      __global float* RESTRICT input_hidden_cuda,
-                      __global float* RESTRICT hidden_partial_sum,
-                      __local  float* RESTRICT input_node,
-                      __local  float* RESTRICT weight_matrix,
+bpnn_layerforward_ocl(__global float* restrict input_cuda,
+                      __global float* restrict output_hidden_cuda,
+                      __global float* restrict input_hidden_cuda,
+                      __global float* restrict hidden_partial_sum,
+                      __local  float* restrict input_node,
+                      __local  float* restrict weight_matrix,
                                int             in,
                                int             hid) 
 {
@@ -64,12 +63,12 @@ bpnn_layerforward_ocl(__global float* RESTRICT input_cuda,
 
 
 __kernel void
-bpnn_adjust_weights_ocl(__global float* RESTRICT delta,   
+bpnn_adjust_weights_ocl(__global float* restrict delta,   
                                  int             hid,         
-                        __global float* RESTRICT ly,      
+                        __global float* restrict ly,      
                                  int             in,          
-                        __global float* RESTRICT w,       
-                        __global float* RESTRICT oldw)
+                        __global float* restrict w,       
+                        __global float* restrict oldw)
 {
 	int by = get_group_id(1);
 	int tx = get_local_id(0);

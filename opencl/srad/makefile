@@ -1,7 +1,27 @@
 include ../../common/make.config
 
-CFLAGS += $(OPENCL_INC) $(KERNEL_DIM)
+CFLAGS += $(OPENCL_INC) $(KERNEL_DIM) -fopenmp
 SOURCES=main.c kernel/kernel_gpu_opencl_wrapper.c util/graphics/graphics.c util/graphics/resize.c util/opencl/opencl.c
+
+ifdef RED_UNROLL
+	CFLAGS += -DRED_UNROLL=$(RED_UNROLL)
+	AOC_FLAGS = -DRED_UNROLL=$(RED_UNROLL)
+endif
+
+ifdef SSIZE
+	CFLAGS += -DSSIZE=$(SSIZE)
+	AOC_FLAGS = -DSSIZE=$(SSIZE)
+endif
+
+ifdef BSIZE
+	CFLAGS += -DBSIZE=$(BSIZE)
+	AOC_FLAGS = -DBSIZE=$(BSIZE)
+endif
+
+ifdef NO_INTERLEAVE
+	CFLAGS += -DNO_INTERLEAVE
+	AOC_FLAGS += --no-interleaving default
+endif
 
 ifdef ALTERA
 	ifdef HOST_ONLY
@@ -17,7 +37,7 @@ ifeq ($(OS),Windows_NT)
 	EXE=srad.exe
 	LDFLAGS+=/out:$@
 	CFLAGS+=/Fo$@
-	# flip the path seperator for Windows (/ -> \)
+	# flip the path separator for Windows (/ -> \)
 	SOURCESTOBUILD=$(subst /,\,$(SOURCES))
 	OBJECTS=$(SOURCESTOBUILD:.c=.obj)
 else
@@ -42,7 +62,7 @@ clean:
 
 ifdef ALTERA
 AOCX:
-	$(MAKE) -C kernel 
+	$(MAKE) -C kernel $(AOC_FLAGS)
 else
 AOCX:
 endif

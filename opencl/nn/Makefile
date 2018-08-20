@@ -34,4 +34,4 @@ release: $(SRC) $(AOT_PROGRAMS)
 	$(CXX) $(CXXFLAGS) $(SRC) -o $(EXE) $(OPENCL_INC) $(OPENCL_LIB) $(EXTRA_FLAGS)
 
 clean: 
-	$(RM) $(EXE) *.aoco *.aocx $(KERNEL_NAMES)
+	$(RM) $(EXE) *.aoco $(KERNEL_NAMES)
