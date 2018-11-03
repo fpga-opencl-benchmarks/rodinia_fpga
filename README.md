@@ -29,7 +29,7 @@ Makefiles are NOT guaranteed to work correctly for kernel compilation and should
 - Hamid Reza Zohouri, Naoya Maruyama, Aaron Smith, Motohiko Matsuda, and Satoshi Matsuoka, "Evaluating and Optimizing OpenCL Kernels for High Performance Computing with FPGAs," Proceedings of the ACM/IEEE International Conference for High Performance Computing, Networking, Storage and Analysis (SC'16), Nov. 2016. [Paper](https://dl.acm.org/citation.cfm?id=3014951)
 - Artur Podobas, Hamid Reza Zohouri, Naoya Maruyama, Satoshi Matsuoka, "Evaluating High-Level Design Strategies on FPGAs for High-Performance Computing," Proceedings of the 27th International Conference on Field Programmable Logic and Applications (FPL'17), Sep. 2017. [Paper](https://ieeexplore.ieee.org/abstract/document/8056760/)
 - Hamid Reza Zohouri, Artur Podobas, Satoshi Matsuoka, "Combined Spatial and Temporal Blocking for High-Performance Stencil Computation on FPGAs Using OpenCL," Proceedings of the 2018 ACM/SIGDA International Symposium on Field-Programmable Gate Arrays (FPGA'18), Feb. 2018. [Paper](https://dl.acm.org/citation.cfm?id=3174248)
-- Hamid Reza Zohouri, "High Performance Computing with FPGAs and OpenCL," PhD thesis, Tokyo Institute of Technology, Tokyo, Japan, Aug. 2018
+- Hamid Reza Zohouri, "High Performance Computing with FPGAs and OpenCL," PhD thesis, Tokyo Institute of Technology, Tokyo, Japan, Aug. 2018. [PDF](https://arxiv.org/abs/1810.09773)
 
 ## Contact
 
