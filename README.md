@@ -35,7 +35,7 @@ Makefiles are NOT guaranteed to work correctly for kernel compilation and should
 
 Hamid Reza Zohouri <br />
 Tokyo Institute of Technology <br />
-zohouri.h.aa@m.titech.ac.jp <br />
+https://www.linkedin.com/in/hamid-reza-zohouri-9aa00230/ <br />
 http://github.com/zohourih
 
 Naoya Maruyama <br />
