@@ -18,7 +18,7 @@ The Rodinia Benchmark Suite for OpenCL-based FPGAs is our modified version of th
 
 Each modified benchmark is available under [the opencl directory](opencl). See [the original README file](README_original) for more details about each benchmark. Each FPGA version has a readme included that describes the parameters and optimizations for that version.
 
-The input data files for the benchmarks are not included in this distribution and needs to be separately downloaded from [here](https://www.cs.virginia.edu/~skadron/wiki/rodinia/index.php).
+The input data files for the benchmarks are not included in this distribution and need to be separately downloaded from [here](http://lava.cs.virginia.edu/Rodinia/download.htm).
 
 ## Important note
 
