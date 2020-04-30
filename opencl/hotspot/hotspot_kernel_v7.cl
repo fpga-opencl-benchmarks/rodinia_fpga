@@ -3,7 +3,7 @@
 //
 // Using, modifying, and distributing this kernel file is permitted for educational, research, and non-profit
 // use cases, as long as this copyright block is kept intact. Using this kernel file in any shape or form,
-// including using it a template/skeleton to develop similar code, is forbidden for commercial/for-profit
+// including using it as a template/skeleton to develop similar code, is forbidden for commercial/for-profit
 // purposes, except with explicit permission from the author (Hamid Reza Zohouri).
 //
 // Contact point: https://www.linkedin.com/in/hamid-reza-zohouri-9aa00230/
